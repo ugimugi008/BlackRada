@@ -1,0 +1,6 @@
+{
+  "name": "Black Rada",
+  "description": "Discord-style webcam Mafia room with dedicated Moderator controls, secret role dealing, night phase orchestration, and on-demand self-hosting.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
