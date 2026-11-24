@@ -32,16 +32,23 @@ Because Black Rada runs real-time **Socket.io game rooms** in memory, it needs a
 
 ---
 
-## Self-Host on Any Laptop / VPS (Docker + LiveKit + HTTPS Tunnel)
+## Recommended for long nights: your own free server (Oracle Cloud)
+
+LiveKit Cloud's free plan (5,000 participant-minutes and 50 GB a month) runs out during a single 16-player, 8-hour night.
+For unlimited nights, run the game **and** your own LiveKit video server on one free Oracle Cloud VM:
 
 ```bash
-export LIVEKIT_API_KEY="your-key"
-export LIVEKIT_API_SECRET="your-32-char-random-secret"
-docker compose --profile sfu --profile tunnel up --build
+curl -fsSL https://raw.githubusercontent.com/ugimugi008/BlackRada/main/deploy/oracle/setup.sh -o setup.sh
+sudo bash setup.sh --domain YOUR-NAME.duckdns.org --duckdns-token YOUR-DUCKDNS-TOKEN
 ```
 
-For quick peer-to-peer games (~2–6 friends) without LiveKit:
+See [deploy/oracle/README.md](deploy/oracle/README.md) for the full walkthrough (account, VM, firewall ports).
+
+## Quick local test with Docker (peer-to-peer video only)
 
 ```bash
 docker compose --profile tunnel up --build
 ```
+
+This prints a temporary `https://...trycloudflare.com` link. Video is peer-to-peer (fine for ~2–6 players).
+A Cloudflare quick tunnel cannot carry LiveKit's video traffic, so don't combine it with the `sfu` profile for remote friends.
