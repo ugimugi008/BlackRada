@@ -4,6 +4,7 @@ import {
   CameraOff,
   Check,
   Copy,
+  Crown,
   LogOut,
   Mic,
   MicOff,
@@ -71,6 +72,7 @@ export default function App() {
   const [hostGuideOpen, setHostGuideOpen] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [nightFeedback, setNightFeedback] = useState<string | null>(null);
+  const [takeoverError, setTakeoverError] = useState<string | null>(null);
   const [selectedNightTargetId, setSelectedNightTargetId] = useState<string | null>(null);
 
   // Auth tokens live strictly in memory (not localStorage/sessionStorage)
@@ -124,8 +126,13 @@ export default function App() {
     setSocket(s);
 
     s.on('room:state', (nextState: RoomPublicState) => {
+      if (!nextState.isMeModerator) moderatorTokenRef.current = null;
       setRoom(nextState);
       roomCodeRef.current = nextState.code;
+    });
+
+    s.on('room:moderatorToken', (payload: { moderatorToken?: string }) => {
+      if (payload?.moderatorToken) moderatorTokenRef.current = payload.moderatorToken;
     });
 
     s.on('room:kicked', (payload: { reason?: string }) => {
@@ -288,6 +295,25 @@ export default function App() {
     navigator.clipboard?.writeText(url).catch(() => {});
     setCopiedInvite(true);
     window.setTimeout(() => setCopiedInvite(false), 1800);
+  };
+
+  const handleClaimModerator = () => {
+    setTakeoverError(null);
+    socket?.emit(
+      'room:claimModerator',
+      {},
+      (res: { ok?: boolean; error?: string; moderatorToken?: string; retryInSeconds?: number }) => {
+        if (res?.ok && res.moderatorToken) {
+          moderatorTokenRef.current = res.moderatorToken;
+        } else if (res?.retryInSeconds) {
+          setTakeoverError(t.takeoverWait.replace('{s}', String(res.retryInSeconds)));
+          window.setTimeout(() => setTakeoverError(null), 4000);
+        } else if (res?.error) {
+          setTakeoverError(res.error);
+          window.setTimeout(() => setTakeoverError(null), 4000);
+        }
+      }
+    );
   };
 
   const emitMod = (event: string, payload: Record<string, unknown> = {}) => {
@@ -460,6 +486,33 @@ export default function App() {
       {/* Main Discord-like Workspace */}
       <div className="relative flex flex-1 overflow-hidden">
         <main className="flex flex-1 flex-col overflow-hidden">
+          {/* Moderator offline: let a player take over */}
+          {!room.isMeModerator && moderatorPlayer && !moderatorPlayer.isConnected && (
+            <div
+              role="status"
+              className="shrink-0 border-b border-[#E0A92B]/30 bg-[#E0A92B]/10 px-3 py-2 sm:px-6 sm:py-2.5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex min-w-0 items-start gap-2">
+                  <Crown className="mt-0.5 h-4 w-4 shrink-0 text-[#FFE27A]" />
+                  <div className="min-w-0">
+                    <p className="font-semibold text-[#FDE9B0]">{t.moderatorOfflineTitle}</p>
+                    <p className="text-[#E5D3A0]/80">
+                      {takeoverError ?? t.moderatorOfflineHint.replace('{name}', moderatorPlayer.nickname)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClaimModerator}
+                  className="h-8 shrink-0 rounded-md bg-[#E0A92B] px-3 text-xs font-bold text-[#1A1206] hover:bg-[#F0BD45]"
+                >
+                  {t.takeOverModerator}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Phase Banner */}
           {(room.phase !== 'LOBBY' || room.lastMorningSummary) && (
             <div className="shrink-0 border-b border-white/10 bg-[#161920] px-3 py-2 sm:px-6 sm:py-2.5">
@@ -745,6 +798,7 @@ export default function App() {
                 emitMod('mod:moveSeat', { targetPlayerId: id, direction })
               }
               onKickPlayer={(id) => emitMod('mod:kickPlayer', { targetPlayerId: id })}
+              onTransferModerator={(id) => emitMod('mod:transferModerator', { targetPlayerId: id })}
               onUpdateRoleConfig={(roleConfig: RoleConfig) =>
                 emitMod('mod:updateRoleConfig', { roleConfig })
               }

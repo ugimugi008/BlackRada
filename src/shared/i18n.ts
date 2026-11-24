@@ -115,6 +115,15 @@ export interface Translations {
   dealSecretRoles: string;
   revealAll: string;
   rosterHint: string;
+  makeModerator: string;
+  makeModeratorConfirm: string;
+  makeModeratorMidGame: string;
+  confirmBtn: string;
+  cancelBtn: string;
+  moderatorOfflineTitle: string;
+  moderatorOfflineHint: string;
+  takeOverModerator: string;
+  takeoverWait: string;
   clearRoles: string;
   noSeatedYet: string;
   shareCodeHint: string;
@@ -289,6 +298,15 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     dealSecretRoles: 'Deal Secret Roles',
     revealAll: 'Reveal All',
     rosterHint: 'Click pencil to rename or select role',
+    makeModerator: 'Make Moderator',
+    makeModeratorConfirm: 'Make {name} the Moderator? You take their seat, roles are cleared and the table goes back to Lobby.',
+    makeModeratorMidGame: 'A game is in progress — it will end.',
+    confirmBtn: 'Confirm',
+    cancelBtn: 'Cancel',
+    moderatorOfflineTitle: 'The Moderator is offline',
+    moderatorOfflineHint: 'If {name} does not come back, anyone can take over. The table goes back to Lobby.',
+    takeOverModerator: 'Take over as Moderator',
+    takeoverWait: 'The Moderator just dropped. Try again in {s}s.',
     clearRoles: 'Clear roles',
     noSeatedYet: 'No seated players yet',
     shareCodeHint: 'Share the room code {code} or invite link with your friends.',
@@ -479,6 +497,15 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     dealSecretRoles: 'Роздати ролі',
     revealAll: 'Відкрити всі',
     rosterHint: 'Натисніть олівець, щоб змінити нік чи роль',
+    makeModerator: 'Зробити Ведучим',
+    makeModeratorConfirm: 'Зробити {name} Ведучим? Ви займете його місце, ролі буде скинуто, а стіл повернеться до Лобі.',
+    makeModeratorMidGame: 'Гра триває — її буде завершено.',
+    confirmBtn: 'Підтвердити',
+    cancelBtn: 'Скасувати',
+    moderatorOfflineTitle: 'Ведучий не в мережі',
+    moderatorOfflineHint: 'Якщо {name} не повернеться, будь-хто може його замінити. Стіл повернеться до Лобі.',
+    takeOverModerator: 'Стати Ведучим',
+    takeoverWait: 'Ведучий щойно вийшов. Спробуйте за {s} с.',
     clearRoles: 'Очистити ролі',
     noSeatedYet: 'Ще немає гравців за столом',
     shareCodeHint: 'Надішліть код {code} або посилання друзям.',

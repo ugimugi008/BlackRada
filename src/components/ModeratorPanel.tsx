@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  Crown,
   EyeOff,
   Gavel,
   MessageSquare,
@@ -38,6 +39,7 @@ interface ModeratorPanelProps {
   onRenamePlayer: (playerId: string, nickname: string) => void;
   onMoveSeat: (playerId: string, direction: 'up' | 'down') => void;
   onKickPlayer: (playerId: string) => void;
+  onTransferModerator: (playerId: string) => void;
   onUpdateRoleConfig: (config: RoleConfig) => void;
   onDealRoles: (mode: 'random' | 'clear') => void;
   onSetPlayerRole: (playerId: string, role: MafiaRole | null) => void;
@@ -64,6 +66,7 @@ export function ModeratorPanel({
   onRenamePlayer,
   onMoveSeat,
   onKickPlayer,
+  onTransferModerator,
   onUpdateRoleConfig,
   onDealRoles,
   onSetPlayerRole,
@@ -85,6 +88,7 @@ export function ModeratorPanel({
 }: ModeratorPanelProps) {
   const [tab, setTab] = useState<'director' | 'roster' | 'chat'>('director');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [handoverId, setHandoverId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('');
   const [chatText, setChatText] = useState('');
   const [chatChannel, setChatChannel] = useState<'public' | 'mafia'>('public');
@@ -680,6 +684,21 @@ export function ModeratorPanel({
 
                     <button
                       type="button"
+                      onClick={() => setHandoverId(handoverId === player.id ? null : player.id)}
+                      aria-label={`${t.makeModerator}: ${player.nickname}`}
+                      aria-expanded={handoverId === player.id}
+                      title={t.makeModerator}
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded border ${
+                        handoverId === player.id
+                          ? 'border-[#E0A92B]/60 bg-[#E0A92B]/20 text-[#FFE27A]'
+                          : 'border-white/10 text-[#9CA3AF] hover:border-[#E0A92B]/40 hover:bg-[#E0A92B]/15 hover:text-[#FFE27A]'
+                      }`}
+                    >
+                      <Crown className="h-3.5 w-3.5" />
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => onKickPlayer(player.id)}
                       aria-label={`Kick ${player.nickname}`}
                       className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-white/10 text-[#9CA3AF] hover:border-rose-500/40 hover:bg-rose-500/15 hover:text-rose-300"
@@ -687,6 +706,45 @@ export function ModeratorPanel({
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
+
+                  {handoverId === player.id && (
+                    <div
+                      role="alertdialog"
+                      aria-label={t.makeModerator}
+                      className="mt-2 rounded-lg border border-[#E0A92B]/40 bg-[#E0A92B]/10 p-2.5"
+                    >
+                      <p className="flex items-start gap-1.5 text-xs leading-relaxed text-[#FDE9B0]">
+                        <Crown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#FFE27A]" />
+                        <span>
+                          {t.makeModeratorConfirm.replace('{name}', player.nickname)}
+                          {room.phase !== 'LOBBY' && room.phase !== 'ENDED' && (
+                            <strong className="mt-1 block font-semibold text-amber-200">
+                              {t.makeModeratorMidGame}
+                            </strong>
+                          )}
+                        </span>
+                      </p>
+                      <div className="mt-2 flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setHandoverId(null)}
+                          className="h-8 rounded border border-white/15 px-3 text-xs font-medium text-[#D1D5DB] hover:bg-white/10"
+                        >
+                          {t.cancelBtn}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setHandoverId(null);
+                            onTransferModerator(player.id);
+                          }}
+                          className="h-8 rounded bg-[#E0A92B] px-3 text-xs font-bold text-[#1A1206] hover:bg-[#F0BD45]"
+                        >
+                          {t.confirmBtn}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

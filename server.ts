@@ -68,6 +68,7 @@ interface RoomInternal {
   roomName: string;
   moderatorId: string;
   moderatorToken: string;
+  moderatorOfflineSince: number | null;
   playerTokens: Map<string, string>; // playerId -> secret token
   playerSockets: Map<string, string>; // playerId -> socketId
   phase: GamePhase;
@@ -136,6 +137,65 @@ function isAuthorizedModerator(room: RoomInternal, playerId: string, token?: str
   if (room.moderatorId !== playerId) return false;
   if (token && room.moderatorToken === token) return true;
   return true; // socketIndex already binds socket.id -> playerId
+}
+
+const MODERATOR_TAKEOVER_GRACE_MS = 15_000;
+
+function resetTableToLobby(room: RoomInternal) {
+  room.phase = 'LOBBY';
+  room.nightNumber = 0;
+  room.dayNumber = 0;
+  room.nightStep = 'SLEEP';
+  room.votes = {};
+  room.nightActions = {
+    mafiaTargetId: null,
+    donCheckId: null,
+    sheriffCheckId: null,
+    doctorSaveId: null,
+  };
+  room.lastMorningSummary = null;
+  room.winner = null;
+  room.timerRunning = false;
+  room.timerSecondsLeft = 90;
+  room.players = room.players.map((p) => ({
+    ...p,
+    isAlive: true,
+    role: null,
+    modForceMuted: false,
+    modForceCamHidden: false,
+  }));
+}
+
+/**
+ * Hands the Moderator role to a seated player. The previous Moderator takes
+ * the new Moderator's seat, and the table goes back to Lobby with roles cleared
+ * (a new Moderator must not inherit knowledge of an in-progress game).
+ * Returns the new moderator token, or null if the target is invalid.
+ */
+function handOverModerator(room: RoomInternal, newModeratorId: string): string | null {
+  const target = room.players.find((p) => p.id === newModeratorId && !p.isModerator);
+  if (!target) return null;
+  const oldModerator = room.players.find((p) => p.id === room.moderatorId) ?? null;
+
+  const seated = room.players.filter((p) => !p.isModerator);
+  const reordered = seated.map((p) => {
+    if (p.id === target.id && oldModerator) return { ...oldModerator, isModerator: false };
+    return p;
+  });
+  if (!oldModerator) {
+    const idx = reordered.findIndex((p) => p.id === target.id);
+    if (idx !== -1) reordered.splice(idx, 1);
+  }
+  const newModerator: PlayerRecord = { ...target, isModerator: true };
+  room.players = [newModerator, ...reordered];
+
+  room.moderatorId = newModerator.id;
+  room.moderatorToken = createSecretToken();
+  room.moderatorOfflineSince = newModerator.isConnected ? null : Date.now();
+  resetTableToLobby(room);
+  renumberSeats(room);
+  room.roleConfig = getRecommendedRoleConfig(room.players.filter((p) => !p.isModerator).length);
+  return room.moderatorToken;
 }
 
 function broadcastRoomState(io: SocketIOServer, room: RoomInternal) {
@@ -248,6 +308,7 @@ async function startServer() {
           roomName,
           moderatorId: playerId,
           moderatorToken,
+          moderatorOfflineSince: null,
           playerTokens: new Map([[playerId, playerToken]]),
           playerSockets: new Map([[playerId, socket.id]]),
           phase: 'LOBBY',
@@ -320,6 +381,7 @@ async function startServer() {
           const existing = room.players.find((p) => p.id === payload.reconnectPlayerId);
           if (expectedToken && expectedToken === payload.reconnectToken && existing) {
             existing.isConnected = true;
+            if (existing.isModerator) room.moderatorOfflineSince = null;
             existing.micMuted = Boolean(payload?.micMuted);
             existing.camOff = Boolean(payload?.camOff);
             room.playerSockets.set(existing.id, socket.id);
@@ -770,31 +832,65 @@ async function startServer() {
     socket.on(
       'mod:resetLobby',
       withModerator((room) => {
-        room.phase = 'LOBBY';
-        room.nightNumber = 0;
-        room.dayNumber = 0;
-        room.nightStep = 'SLEEP';
-        room.votes = {};
-        room.nightActions = {
-          mafiaTargetId: null,
-          donCheckId: null,
-          sheriffCheckId: null,
-          doctorSaveId: null,
-        };
-        room.lastMorningSummary = null;
-        room.winner = null;
-        room.timerRunning = false;
-        room.timerSecondsLeft = 90;
-        room.players = room.players.map((p) => ({
-          ...p,
-          isAlive: true,
-          role: null,
-          modForceMuted: false,
-          modForceCamHidden: false,
-        }));
+        resetTableToLobby(room);
         addSystemMessage(room, 'Moderator reset the table to Lobby for a new round.');
       })
     );
+
+    const sendModeratorToken = (room: RoomInternal, token: string) => {
+      const sid = room.playerSockets.get(room.moderatorId);
+      if (sid) io.to(sid).emit('room:moderatorToken', { moderatorToken: token });
+    };
+
+    socket.on(
+      'mod:transferModerator',
+      withModerator((room, mod, payload) => {
+        const targetId = String(payload.targetPlayerId || '');
+        if (!targetId || targetId === mod.id) return;
+        const targetName = room.players.find((p) => p.id === targetId)?.nickname;
+        const token = handOverModerator(room, targetId);
+        if (!token) return;
+        sendModeratorToken(room, token);
+        addSystemMessage(
+          room,
+          `${mod.nickname} passed the Moderator role to ${targetName}. The table is back in Lobby.`
+        );
+      })
+    );
+
+    socket.on('room:claimModerator', (_payload: unknown, ack?: (res: Record<string, unknown>) => void) => {
+      const ctx = socketIndex.get(socket.id);
+      if (!ctx) return;
+      const room = rooms.get(ctx.roomCode);
+      if (!room) return;
+      const claimant = room.players.find((p) => p.id === ctx.playerId);
+      if (!claimant || claimant.isModerator) {
+        ack?.({ ok: false, error: 'You are already the Moderator.' });
+        return;
+      }
+      const currentMod = room.players.find((p) => p.id === room.moderatorId);
+      if (currentMod?.isConnected) {
+        ack?.({ ok: false, error: 'The Moderator is back online.' });
+        return;
+      }
+      const offlineFor = Date.now() - (room.moderatorOfflineSince ?? 0);
+      if (room.moderatorOfflineSince !== null && offlineFor < MODERATOR_TAKEOVER_GRACE_MS) {
+        const wait = Math.ceil((MODERATOR_TAKEOVER_GRACE_MS - offlineFor) / 1000);
+        ack?.({ ok: false, error: `The Moderator just dropped. Try again in ${wait}s.`, retryInSeconds: wait });
+        return;
+      }
+      const token = handOverModerator(room, claimant.id);
+      if (!token) {
+        ack?.({ ok: false, error: 'Could not take over.' });
+        return;
+      }
+      addSystemMessage(
+        room,
+        `${claimant.nickname} took over as Moderator because ${currentMod?.nickname ?? 'the Moderator'} was offline. The table is back in Lobby.`
+      );
+      broadcastRoomState(io, room);
+      ack?.({ ok: true, moderatorToken: token });
+    });
 
     socket.on(
       'mod:timerControl',
@@ -910,6 +1006,7 @@ async function startServer() {
         broadcastRoomState(io, room);
       } else {
         player.isConnected = false;
+        if (player.isModerator) room.moderatorOfflineSince = Date.now();
         room.playerSockets.delete(player.id);
         io.to(room.code).emit('rtc:peerLeft', { playerId: player.id });
         broadcastRoomState(io, room);
