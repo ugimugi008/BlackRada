@@ -144,6 +144,14 @@ export interface Translations extends LogDictionary {
   muteGraveyardHint: string;
   showGraveyard: string;
   hideGraveyard: string;
+  rejoiningSeat: string;
+  rejoiningCancel: string;
+  lastWordsTitle: string;
+  lastWordsYou: string;
+  lastWordsAdd: string;
+  lastWordsEndBtn: string;
+  lastWordsSetting: string;
+  lastWordsOff: string;
   clearRoles: string;
   noSeatedYet: string;
   shareCodeHint: string;
@@ -338,6 +346,14 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     muteGraveyardHint: "Focus on the game: you won't hear other eliminated players. They can still hear you.",
     showGraveyard: 'Show Graveyard',
     hideGraveyard: 'Hide Graveyard',
+    rejoiningSeat: 'Getting you back to your seat…',
+    rejoiningCancel: 'Cancel and start over',
+    lastWordsTitle: 'Last words',
+    lastWordsYou: 'Your last words. Everyone can hear you.',
+    lastWordsAdd: '+30 s',
+    lastWordsEndBtn: 'End',
+    lastWordsSetting: 'Last words',
+    lastWordsOff: 'Off',
     clearRoles: 'Clear roles',
     noSeatedYet: 'No seated players yet',
     shareCodeHint: 'Share the room code {code} or invite link with your friends.',
@@ -546,6 +562,14 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     muteGraveyardHint: 'Зосередьтеся на грі: ви не чутимете інших вибулих. Вони вас чують.',
     showGraveyard: 'Показати цвинтар',
     hideGraveyard: 'Сховати цвинтар',
+    rejoiningSeat: 'Повертаємо вас на ваше місце…',
+    rejoiningCancel: 'Скасувати й почати заново',
+    lastWordsTitle: 'Останнє слово',
+    lastWordsYou: 'Ваше останнє слово. Вас чують усі.',
+    lastWordsAdd: '+30 с',
+    lastWordsEndBtn: 'Завершити',
+    lastWordsSetting: 'Останнє слово',
+    lastWordsOff: 'Вимк.',
     clearRoles: 'Очистити ролі',
     noSeatedYet: 'Ще немає гравців за столом',
     shareCodeHint: 'Надішліть код {code} або посилання друзям.',

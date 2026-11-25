@@ -28,6 +28,8 @@ export interface MediaContext {
   moderatorListeningToGraveyard: boolean;
   /** An eliminated viewer chose to mute the Graveyard to focus on the game (local). */
   deadViewerMutedGraveyard?: boolean;
+  /** Eliminated player currently giving last words: treated as at the table. */
+  lastWordsPlayerId?: string | null;
 }
 
 export interface Perception {
@@ -58,8 +60,9 @@ export function perceive(viewer: MediaPerson | null, target: MediaPerson, ctx: M
   if (viewer.id === target.id) return { see: true, hear: false }; // own preview, never echo
 
   const { phase, nightStep } = ctx;
-  const targetDead = isInGraveyard(target, phase);
-  const viewerDead = isInGraveyard(viewer, phase);
+  const speaking = ctx.lastWordsPlayerId ?? null;
+  const targetDead = isInGraveyard(target, phase) && target.id !== speaking;
+  const viewerDead = isInGraveyard(viewer, phase) && viewer.id !== speaking;
 
   if (targetDead) {
     if (viewerDead) return { see: true, hear: !ctx.deadViewerMutedGraveyard };

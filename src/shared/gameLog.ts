@@ -33,6 +33,8 @@ export type LogKey =
   | 'left'
   | 'seatsShuffled'
   | 'seatChanged'
+  | 'lastWordsStart'
+  | 'lastWordsEnd'
   // Private feedback & errors (not table log lines, same translation path)
   | 'fbMarked'
   | 'fbIsSheriff'
@@ -45,7 +47,9 @@ export type LogKey =
   | 'errRoomFull'
   | 'errAlreadyModerator'
   | 'errModeratorBack'
-  | 'errTakeoverFailed';
+  | 'errTakeoverFailed'
+  | 'errSessionExpired'
+  | 'errReplaced';
 
 export type LogParams = Record<string, string | number>;
 
@@ -86,6 +90,8 @@ export const LOG_EN: LogDictionary = {
     left: '{name} left the room.',
     seatsShuffled: 'Moderator shuffled the seats. Check your new number.',
     seatChanged: 'Moderator moved {name} to Seat {seat}.',
+    lastWordsStart: 'Last words: Seat {seat} ({name}), {s} seconds.',
+    lastWordsEnd: 'Last words are over.',
     fbMarked: 'Marked {name} for tonight.',
     fbIsSheriff: '{name} is the Sheriff!',
     fbNotSheriff: '{name} is not the Sheriff.',
@@ -98,6 +104,8 @@ export const LOG_EN: LogDictionary = {
     errAlreadyModerator: 'You are already the Moderator.',
     errModeratorBack: 'The Moderator is back online.',
     errTakeoverFailed: 'Could not take over.',
+    errSessionExpired: 'Your previous seat is no longer available. Join again with the room code.',
+    errReplaced: 'This seat was opened in another tab or on another device.',
   },
   teamNames: { TOWN: 'Town', MAFIA: 'Mafia' },
 };
@@ -129,6 +137,8 @@ export const LOG_UK: LogDictionary = {
     left: '{name} виходить з кімнати.',
     seatsShuffled: 'Ведучий перемішує місця. Перевірте свій новий номер.',
     seatChanged: 'Ведучий пересаджує {name} на місце {seat}.',
+    lastWordsStart: 'Останнє слово: місце {seat} ({name}), {s} с.',
+    lastWordsEnd: 'Останнє слово завершено.',
     fbMarked: 'Ціль на цю ніч: {name}.',
     fbIsSheriff: '{name} — Шериф!',
     fbNotSheriff: '{name} — не Шериф.',
@@ -141,6 +151,8 @@ export const LOG_UK: LogDictionary = {
     errAlreadyModerator: 'Ви вже Ведучий.',
     errModeratorBack: 'Ведучий знову в мережі.',
     errTakeoverFailed: 'Не вдалося стати Ведучим.',
+    errSessionExpired: 'Ваше попереднє місце вже недоступне. Приєднайтеся знову за кодом кімнати.',
+    errReplaced: 'Це місце відкрито в іншій вкладці або на іншому пристрої.',
   },
   teamNames: { TOWN: 'Місто', MAFIA: 'Мафія' },
 };

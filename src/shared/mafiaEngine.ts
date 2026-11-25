@@ -48,6 +48,12 @@ export interface ChatMessage {
   log?: LogEntry;
 }
 
+/** An eliminated player's final speech: everyone sees and hears them until it ends. */
+export interface LastWords {
+  playerId: string;
+  secondsLeft: number;
+}
+
 export interface RoomPublicState {
   code: string;
   roomName: string;
@@ -63,6 +69,9 @@ export interface RoomPublicState {
   winner: WinnerSide;
   timerSecondsLeft: number;
   timerRunning: boolean;
+  lastWords: LastWords | null;
+  /** Length of last words for this table; 0 = off. */
+  lastWordsSeconds: number;
   myPlayerId: string;
   myRole: MafiaRole | null;
   isMeModerator: boolean;
@@ -356,6 +365,8 @@ export function redactRoomForViewer(
     winner: WinnerSide;
     timerSecondsLeft: number;
     timerRunning: boolean;
+    lastWords?: LastWords | null;
+    lastWordsSeconds?: number;
     messages: ChatMessage[];
   },
   viewerId: string
@@ -364,7 +375,12 @@ export function redactRoomForViewer(
   const isMeModerator = Boolean(viewer?.isModerator);
   const gameRunning = room.phase === 'NIGHT' || room.phase === 'DAY' || room.phase === 'VOTING';
   // Eliminated players spectate from the Graveyard and see every role.
-  const viewerInGraveyard = Boolean(viewer && !viewer.isModerator && !viewer.isAlive && gameRunning);
+  // Someone giving last words is still heard by the living, so they don't get the
+  // Graveyard's knowledge (roles, Mafia/Graveyard chat) until their speech ends.
+  const givingLastWords = Boolean(viewer && room.lastWords?.playerId === viewer.id);
+  const viewerInGraveyard = Boolean(
+    viewer && !viewer.isModerator && !viewer.isAlive && gameRunning && !givingLastWords
+  );
   const revealAll = isMeModerator || room.phase === 'ENDED' || viewerInGraveyard;
 
   const playersForViewer = room.players.map((p) => {
@@ -412,6 +428,8 @@ export function redactRoomForViewer(
     winner: room.winner,
     timerSecondsLeft: room.timerSecondsLeft,
     timerRunning: room.timerRunning,
+    lastWords: room.lastWords ?? null,
+    lastWordsSeconds: room.lastWordsSeconds ?? 60,
     myPlayerId: viewerId,
     myRole: viewer?.role ?? null,
     isMeModerator,

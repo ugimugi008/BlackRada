@@ -85,6 +85,8 @@ interface RoomInternal {
   winner: WinnerSide;
   timerSecondsLeft: number;
   timerRunning: boolean;
+  lastWords: { playerId: string; secondsLeft: number } | null;
+  lastWordsSeconds: number;
   messages: ChatMessage[];
   createdAt: number;
 }
@@ -168,6 +170,7 @@ function resetTableToLobby(room: RoomInternal) {
   room.winner = null;
   room.timerRunning = false;
   room.timerSecondsLeft = 90;
+  room.lastWords = null;
   room.players = room.players.map((p) => ({
     ...p,
     isAlive: true,
@@ -207,6 +210,26 @@ function handOverModerator(room: RoomInternal, newModeratorId: string): string |
   renumberSeats(room);
   room.roleConfig = getRecommendedRoleConfig(room.players.filter((p) => !p.isModerator).length);
   return room.moderatorToken;
+}
+
+/** Give an eliminated player their last words (if the table uses them). */
+function startLastWords(room: RoomInternal, playerId: string) {
+  if (room.lastWordsSeconds <= 0 || room.phase === 'ENDED' || room.phase === 'LOBBY') return;
+  const p = room.players.find((x) => x.id === playerId && !x.isModerator);
+  if (!p) return;
+  room.lastWords = { playerId, secondsLeft: room.lastWordsSeconds };
+  room.timerRunning = false; // the discussion timer waits until they're done
+  addSystemMessage(room, 'lastWordsStart', {
+    seat: formatSeatNumber(p.seatNumber),
+    name: p.nickname,
+    s: room.lastWordsSeconds,
+  });
+}
+
+function endLastWords(room: RoomInternal) {
+  if (!room.lastWords) return;
+  room.lastWords = null;
+  addSystemMessage(room, 'lastWordsEnd');
 }
 
 function broadcastRoomState(io: SocketIOServer, room: RoomInternal) {
@@ -267,6 +290,12 @@ async function startServer() {
   // Global 1-second timer tick for rooms with an active discussion timer
   setInterval(() => {
     for (const room of rooms.values()) {
+      if (room.lastWords) {
+        room.lastWords.secondsLeft -= 1;
+        if (room.lastWords.secondsLeft <= 0) endLastWords(room);
+        broadcastRoomState(io, room);
+        continue;
+      }
       if (!room.timerRunning) continue;
       if (room.timerSecondsLeft > 0) {
         room.timerSecondsLeft -= 1;
@@ -335,6 +364,8 @@ async function startServer() {
             sheriffCheckId: null,
             doctorSaveId: null,
           },
+          lastWords: null,
+          lastWordsSeconds: 60,
           lastMorningSummary: null,
           winner: null,
           timerSecondsLeft: 90,
@@ -373,6 +404,8 @@ async function startServer() {
           camOff?: boolean;
           reconnectPlayerId?: string;
           reconnectToken?: string;
+          /** Auto-rejoin after a reload: never fall through to creating a new player. */
+          reconnectOnly?: boolean;
         },
         ack?: (res: Record<string, unknown>) => void
       ) => {
@@ -382,7 +415,8 @@ async function startServer() {
           .slice(0, 8);
         const room = rooms.get(code);
         if (!room) {
-          { const k = keyed('errRoomNotFound'); ack?.({ ok: false, error: k.text, errorEntry: k.entry }); }
+          const k = keyed(payload?.reconnectOnly ? 'errSessionExpired' : 'errRoomNotFound');
+          ack?.({ ok: false, error: k.text, errorEntry: k.entry, sessionExpired: Boolean(payload?.reconnectOnly) });
           return;
         }
 
@@ -391,6 +425,17 @@ async function startServer() {
           const expectedToken = room.playerTokens.get(payload.reconnectPlayerId);
           const existing = room.players.find((p) => p.id === payload.reconnectPlayerId);
           if (expectedToken && expectedToken === payload.reconnectToken && existing) {
+            // A previous connection for this seat may still be alive (network switch,
+            // second tab). Retire it so its late disconnect can't mark us offline.
+            const oldSid = room.playerSockets.get(existing.id);
+            if (oldSid && oldSid !== socket.id) {
+              socketIndex.delete(oldSid);
+              const oldSocket = io.sockets.sockets.get(oldSid);
+              if (oldSocket) {
+                oldSocket.emit('room:replaced');
+                oldSocket.leave(code);
+              }
+            }
             existing.isConnected = true;
             if (existing.isModerator) room.moderatorOfflineSince = null;
             existing.micMuted = Boolean(payload?.micMuted);
@@ -415,6 +460,12 @@ async function startServer() {
             });
             return;
           }
+        }
+
+        if (payload?.reconnectOnly) {
+          const k = keyed('errSessionExpired');
+          ack?.({ ok: false, error: k.text, errorEntry: k.entry, sessionExpired: true });
+          return;
         }
 
         const seatedCount = room.players.filter((p) => !p.isModerator).length;
@@ -501,7 +552,8 @@ async function startServer() {
       let channel: 'public' | 'mafia' | 'dead' =
         requested === 'mafia' ? 'mafia' : requested === 'dead' ? 'dead' : 'public';
       const gameRunning = room.phase === 'NIGHT' || room.phase === 'DAY' || room.phase === 'VOTING';
-      const inGraveyard = !player.isModerator && !player.isAlive && gameRunning;
+      const inGraveyard =
+        !player.isModerator && !player.isAlive && gameRunning && room.lastWords?.playerId !== player.id;
       if (inGraveyard) {
         // The dead can only talk among themselves while the game runs.
         channel = 'dead';
@@ -740,6 +792,7 @@ async function startServer() {
         if (anyRoleMissing) {
           room.players = assignRolesToPlayers(room.players, room.roleConfig);
         }
+        room.lastWords = null;
         room.phase = 'NIGHT';
         room.nightNumber += 1;
         room.nightStep = 'SLEEP';
@@ -815,6 +868,7 @@ async function startServer() {
           room.phase = 'DAY';
           room.timerSecondsLeft = 90;
           room.timerRunning = false;
+          if (outcome.eliminatedPlayerId) startLastWords(room, outcome.eliminatedPlayerId);
         }
       })
     );
@@ -832,6 +886,7 @@ async function startServer() {
     socket.on(
       'mod:startVoting',
       withModerator((room) => {
+        room.lastWords = null;
         room.phase = 'VOTING';
         room.votes = {};
         room.timerRunning = false;
@@ -875,6 +930,7 @@ async function startServer() {
           addSystemMessage(room, 'teamWins', { team: winner });
         } else {
           room.phase = 'DAY';
+          if (targetId) startLastWords(room, targetId);
         }
       })
     );
@@ -886,6 +942,7 @@ async function startServer() {
         room.winner = winner;
         room.phase = 'ENDED';
         room.timerRunning = false;
+        room.lastWords = null;
         addSystemMessage(room, 'roundEnded');
       })
     );
@@ -946,6 +1003,36 @@ async function startServer() {
       broadcastRoomState(io, room);
       ack?.({ ok: true, moderatorToken: token });
     });
+
+    socket.on(
+      'mod:lastWords',
+      withModerator((room, _mod, payload) => {
+        const action = String(payload.action || '');
+        if (action === 'end') {
+          endLastWords(room);
+        } else if (action === 'add' && room.lastWords) {
+          room.lastWords.secondsLeft = Math.min(300, room.lastWords.secondsLeft + 30);
+        } else if (action === 'start') {
+          // Manual: give last words to an eliminated player (e.g. after a manual elimination).
+          const target = room.players.find((p) => p.id === String(payload.targetPlayerId || ''));
+          if (target && !target.isAlive) {
+            const saved = room.lastWordsSeconds;
+            if (saved <= 0) room.lastWordsSeconds = 60;
+            startLastWords(room, target.id);
+            room.lastWordsSeconds = saved;
+          }
+        }
+      })
+    );
+
+    socket.on(
+      'mod:setLastWordsSeconds',
+      withModerator((room, _mod, payload) => {
+        const allowed = [0, 30, 60, 90];
+        const secs = Number(payload.seconds);
+        if (allowed.includes(secs)) room.lastWordsSeconds = secs;
+      })
+    );
 
     socket.on(
       'mod:timerControl',
@@ -1056,6 +1143,8 @@ async function startServer() {
 
       const player = room.players.find((p) => p.id === ctx.playerId);
       if (!player) return;
+      // Ignore a stale connection: the player already reconnected on a newer one.
+      if (room.playerSockets.get(player.id) !== socket.id) return;
 
       if (explicitLeave && !player.isModerator) {
         room.players = room.players.filter((p) => p.id !== player.id);

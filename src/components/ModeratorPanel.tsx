@@ -3,6 +3,7 @@ import {
   ArrowUp,
   Check,
   Crown,
+  Flame,
   EyeOff,
   Gavel,
   MessageSquare,
@@ -40,6 +41,8 @@ interface ModeratorPanelProps {
   onRenamePlayer: (playerId: string, nickname: string) => void;
   onMoveSeat: (playerId: string, direction: 'up' | 'down') => void;
   onShuffleSeats: () => void;
+  onSetLastWordsSeconds: (seconds: number) => void;
+  onGiveLastWords: (playerId: string) => void;
   onKickPlayer: (playerId: string) => void;
   onTransferModerator: (playerId: string) => void;
   onUpdateRoleConfig: (config: RoleConfig) => void;
@@ -68,6 +71,8 @@ export function ModeratorPanel({
   onRenamePlayer,
   onMoveSeat,
   onShuffleSeats,
+  onSetLastWordsSeconds,
+  onGiveLastWords,
   onKickPlayer,
   onTransferModerator,
   onUpdateRoleConfig,
@@ -412,6 +417,34 @@ export function ModeratorPanel({
             </div>
           </section>
 
+          {/* Last words length */}
+          <section aria-label={t.lastWordsSetting} className="border-t border-white/10 pt-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
+                <Flame className="h-3.5 w-3.5 text-amber-300" />
+                {t.lastWordsSetting}
+              </h3>
+              <div className="flex items-center gap-1" role="radiogroup" aria-label={t.lastWordsSetting}>
+                {[0, 30, 60, 90].map((secs) => (
+                  <button
+                    key={secs}
+                    type="button"
+                    role="radio"
+                    aria-checked={room.lastWordsSeconds === secs}
+                    onClick={() => onSetLastWordsSeconds(secs)}
+                    className={`h-8 rounded-md border px-2.5 font-mono text-xs ${
+                      room.lastWordsSeconds === secs
+                        ? 'border-amber-400/50 bg-amber-500/20 text-amber-100'
+                        : 'border-white/10 bg-[#0F1115] text-[#D1D5DB] hover:bg-white/10'
+                    }`}
+                  >
+                    {secs === 0 ? t.lastWordsOff : `${secs}s`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+
           {/* Role Deck Setup */}
           <section aria-label="Role deck setup" className="border-t border-white/10 pt-4">
             <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
@@ -686,6 +719,19 @@ export function ModeratorPanel({
                         </>
                       )}
                     </button>
+
+                    {!player.isAlive &&
+                      (room.phase === 'DAY' || room.phase === 'NIGHT' || room.phase === 'VOTING') && (
+                        <button
+                          type="button"
+                          onClick={() => onGiveLastWords(player.id)}
+                          aria-label={`${t.lastWordsTitle}: ${player.nickname}`}
+                          title={t.lastWordsTitle}
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-amber-400/30 text-amber-300 hover:bg-amber-500/15"
+                        >
+                          <Flame className="h-3.5 w-3.5" />
+                        </button>
+                      )}
 
                     <button
                       type="button"

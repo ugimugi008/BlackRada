@@ -18,7 +18,7 @@ interface ChatBoxProps {
 /** Table chat + game log, shared by the player and Moderator panels. */
 export function ChatBox({ t, room, onSendChat, title }: ChatBoxProps) {
   const me = room.players.find((p) => p.id === room.myPlayerId) ?? null;
-  const iAmDead = Boolean(me && isInGraveyard(me, room.phase));
+  const iAmDead = Boolean(me && isInGraveyard(me, room.phase) && room.lastWords?.playerId !== me.id);
   const isMafiaTeam = room.myRole === 'mafia' || room.myRole === 'don';
   const graveyardActive = room.phase === 'NIGHT' || room.phase === 'DAY' || room.phase === 'VOTING';
 

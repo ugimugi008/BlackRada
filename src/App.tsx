@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Copy,
   Crown,
+  Flame,
   Ghost,
   LogOut,
   Maximize,
@@ -33,6 +34,7 @@ import { formatLog, type LogEntry } from './shared/gameLog';
 import { TRANSLATIONS, formatPhaseLabel, type Language } from './shared/i18n';
 import { isAwakeForMedia, isGraveyardActive, isInGraveyard, perceive } from './shared/mediaPolicy';
 import {
+  formatSeatNumber,
   isPlayerAwakeDuringNight,
   tallyVotes,
   type MafiaRole,
@@ -41,6 +43,13 @@ import {
   type RoomPublicState,
 } from './shared/mafiaEngine';
 import BrandLogo from './components/BrandLogo';
+import {
+  clearSeatSession,
+  loadSeatSession,
+  saveSeatSession,
+  updateSeatSession,
+  type SeatSession,
+} from './session';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || undefined;
 const LANG_STORAGE_KEY = 'black_rada_lang';
@@ -66,13 +75,25 @@ export default function App() {
   const [lang, setLang] = useState<Language>(() => resolveInitialLanguage(urlParams));
   const t = TRANSLATIONS[lang];
 
+  // A seat saved on this device (reload / closed tab / dead battery): rejoin it.
+  // Ignored when the link points at a different room.
+  const [restored] = useState<SeatSession | null>(() => {
+    const saved = loadSeatSession();
+    if (!saved) return null;
+    const linkRoom = (urlParams.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return linkRoom && linkRoom !== saved.code ? null : saved;
+  });
+  const [rejoining, setRejoining] = useState(Boolean(restored));
   const [socket, setSocket] = useState<Socket | null>(null);
   const [room, setRoom] = useState<RoomPublicState | null>(null);
   const [livekit, setLivekit] = useState<LiveKitCredentials | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [micMuted, setMicMuted] = useState(false);
-  const [camOff, setCamOff] = useState(false);
+  const [micMuted, setMicMuted] = useState(restored?.micMuted ?? false);
+  const [camOff, setCamOff] = useState(restored?.camOff ?? false);
+  const mediaPrefRef = useRef({ micMuted, camOff });
+  mediaPrefRef.current = { micMuted, camOff };
+  const mediaReadyRef = useRef<Promise<unknown> | null>(null);
   const [noiseFilterEnabled, setNoiseFilterEnabled] = useState(true);
   const [seatFilter, setSeatFilter] = useState<'all' | 'alive'>('all');
   const [copiedInvite, setCopiedInvite] = useState(false);
@@ -90,11 +111,24 @@ export default function App() {
   const [takeoverError, setTakeoverError] = useState<string | null>(null);
   const [selectedNightTargetId, setSelectedNightTargetId] = useState<string | null>(null);
 
-  // Auth tokens live strictly in memory (not localStorage/sessionStorage)
-  const playerIdRef = useRef<string | null>(null);
-  const playerTokenRef = useRef<string | null>(null);
-  const moderatorTokenRef = useRef<string | null>(null);
-  const roomCodeRef = useRef<string | null>(null);
+  // Seat tokens: kept in memory and mirrored to this device (src/session.ts) so a
+  // reload can rejoin the same seat. A token only grants that seat, for 12 hours.
+  const playerIdRef = useRef<string | null>(restored?.playerId ?? null);
+  const playerTokenRef = useRef<string | null>(restored?.playerToken ?? null);
+  const moderatorTokenRef = useRef<string | null>(restored?.moderatorToken ?? null);
+  const roomCodeRef = useRef<string | null>(restored?.code ?? null);
+
+  const rememberSeat = useCallback(() => {
+    if (!roomCodeRef.current || !playerIdRef.current || !playerTokenRef.current) return;
+    saveSeatSession({
+      code: roomCodeRef.current,
+      playerId: playerIdRef.current,
+      playerToken: playerTokenRef.current,
+      moderatorToken: moderatorTokenRef.current,
+      micMuted: mediaPrefRef.current.micMuted,
+      camOff: mediaPrefRef.current.camOff,
+    });
+  }, []);
 
   const initialRoomCode = (urlParams.get('room') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   const autostart = urlParams.get('autostart') === '1';
@@ -126,6 +160,7 @@ export default function App() {
       nightStep: room.nightStep,
       moderatorListeningToGraveyard: moderatorListening,
       deadViewerMutedGraveyard: graveyardMuted,
+      lastWordsPlayerId: room.lastWords?.playerId ?? null,
     };
     const narrow = typeof window !== 'undefined' && window.innerWidth < 768;
     const gridTiles = room.players.filter((p) => seatFilter === 'all' || p.isAlive || p.isModerator).length;
@@ -136,7 +171,8 @@ export default function App() {
       let video: RemotePref['video'] = gridQuality;
       if (!perc.see || p.camOff || p.modForceCamHidden) video = 'off';
       else if (focusedId) video = focusedId === p.id ? 'high' : 'low';
-      else if (me.isModerator && isInGraveyard(p, room.phase) && !graveyardOpen) video = 'off';
+      else if (me.isModerator && isInGraveyard(p, room.phase) && p.id !== room.lastWords?.playerId && !graveyardOpen)
+        video = 'off';
       else if (seatFilter === 'alive' && !p.isAlive && !p.isModerator) video = 'off';
       prefs[p.id] = { video, audio: perc.hear };
     }
@@ -161,6 +197,15 @@ export default function App() {
     noiseFilterEnabled,
     remotePrefs,
   });
+
+  // After a reload into a saved seat, restart the camera/mic before rejoining
+  // (the browser usually remembers the permission, so no prompt appears).
+  const restoreMediaStartedRef = useRef(false);
+  useEffect(() => {
+    if (!restored || restoreMediaStartedRef.current) return;
+    restoreMediaStartedRef.current = true;
+    mediaReadyRef.current = initLocalMedia(true, true).catch(() => null);
+  }, [restored, initLocalMedia]);
 
   // Peer-to-peer mode: dial the existing players only after our own id is known;
   // calling earlier silently did nothing, so joiners never connected.
@@ -197,6 +242,20 @@ export default function App() {
     }
   }, [room, focusedId]);
 
+  // Last words: spotlight the speaker for everyone, then return to the grid.
+  const autoFocusedRef = useRef<string | null>(null);
+  const lastWordsSpeakerId = room?.lastWords?.playerId ?? null;
+  useEffect(() => {
+    if (lastWordsSpeakerId) {
+      autoFocusedRef.current = lastWordsSpeakerId;
+      setFocusedId(lastWordsSpeakerId);
+    } else if (autoFocusedRef.current) {
+      const was = autoFocusedRef.current;
+      autoFocusedRef.current = null;
+      setFocusedId((cur) => (cur === was ? null : cur));
+    }
+  }, [lastWordsSpeakerId]);
+
   const toggleFullscreen = useCallback(() => {
     const el = focusStageRef.current;
     if (!el) return;
@@ -214,13 +273,31 @@ export default function App() {
     setSocket(s);
 
     s.on('room:state', (nextState: RoomPublicState) => {
-      if (!nextState.isMeModerator) moderatorTokenRef.current = null;
+      if (!nextState.isMeModerator && moderatorTokenRef.current) {
+        moderatorTokenRef.current = null;
+        updateSeatSession({ moderatorToken: null });
+      }
       setRoom(nextState);
       roomCodeRef.current = nextState.code;
     });
 
     s.on('room:moderatorToken', (payload: { moderatorToken?: string }) => {
-      if (payload?.moderatorToken) moderatorTokenRef.current = payload.moderatorToken;
+      if (payload?.moderatorToken) {
+        moderatorTokenRef.current = payload.moderatorToken;
+        updateSeatSession({ moderatorToken: payload.moderatorToken });
+      }
+    });
+
+    // This seat was opened in another tab or on another device.
+    s.on('room:replaced', () => {
+      setRoom(null);
+      setLivekit(null);
+      playerIdRef.current = null;
+      playerTokenRef.current = null;
+      moderatorTokenRef.current = null;
+      roomCodeRef.current = null;
+      setErrorEntry({ key: 'errReplaced' });
+      setErrorMessage('This seat was opened in another tab or device.');
     });
 
     s.on('room:kicked', (payload: { reason?: string }) => {
@@ -230,34 +307,58 @@ export default function App() {
       playerTokenRef.current = null;
       moderatorTokenRef.current = null;
       roomCodeRef.current = null;
+      clearSeatSession();
       setErrorMessage(payload?.reason || 'You were removed from the room.');
     });
 
-    s.on('connect', () => {
-      if (roomCodeRef.current && playerIdRef.current && playerTokenRef.current) {
-        s.emit(
-          'room:join',
-          {
-            code: roomCodeRef.current,
-            reconnectPlayerId: playerIdRef.current,
-            reconnectToken: playerTokenRef.current,
-            micMuted,
-            camOff,
-          },
-          (res: {
-            ok?: boolean;
-            state?: RoomPublicState;
-            peerIds?: string[];
-            livekit?: LiveKitCredentials | null;
-          }) => {
-            if (res?.ok && res.state) {
-              setRoom(res.state);
-              setLivekit(res.livekit ?? null);
-              if (res.peerIds?.length) pendingPeerIdsRef.current = res.peerIds;
-            }
-          }
-        );
+    // Rejoin our seat on every (re)connection: network blips, and page reloads
+    // via the seat saved on this device.
+    s.on('connect', async () => {
+      if (!roomCodeRef.current || !playerIdRef.current || !playerTokenRef.current) return;
+      // After a reload, give the camera a moment to start so it joins with video.
+      if (mediaReadyRef.current) {
+        await Promise.race([mediaReadyRef.current, new Promise((r) => setTimeout(r, 4000))]);
       }
+      s.emit(
+        'room:join',
+        {
+          code: roomCodeRef.current,
+          reconnectPlayerId: playerIdRef.current,
+          reconnectToken: playerTokenRef.current,
+          reconnectOnly: true,
+          micMuted: mediaPrefRef.current.micMuted,
+          camOff: mediaPrefRef.current.camOff,
+        },
+        (res: {
+          ok?: boolean;
+          error?: string;
+          errorEntry?: LogEntry;
+          sessionExpired?: boolean;
+          moderatorToken?: string;
+          state?: RoomPublicState;
+          peerIds?: string[];
+          livekit?: LiveKitCredentials | null;
+        }) => {
+          setRejoining(false);
+          if (res?.ok && res.state) {
+            if (res.moderatorToken) moderatorTokenRef.current = res.moderatorToken;
+            setRoom(res.state);
+            setLivekit(res.livekit ?? null);
+            if (res.peerIds?.length) pendingPeerIdsRef.current = res.peerIds;
+            rememberSeat();
+          } else if (res?.sessionExpired) {
+            playerIdRef.current = null;
+            playerTokenRef.current = null;
+            moderatorTokenRef.current = null;
+            roomCodeRef.current = null;
+            clearSeatSession();
+            setRoom(null);
+            setLivekit(null);
+            setErrorEntry(res.errorEntry ?? null);
+            setErrorMessage(res.error ?? null);
+          }
+        }
+      );
     });
 
     return () => {
@@ -300,6 +401,7 @@ export default function App() {
           roomCodeRef.current = res.code ?? null;
           setLivekit(res.livekit ?? null);
           setRoom(res.state);
+          rememberSeat();
         }
       );
     },
@@ -338,6 +440,7 @@ export default function App() {
           roomCodeRef.current = res.code ?? null;
           setLivekit(res.livekit ?? null);
           setRoom(res.state);
+          rememberSeat();
           // Connect once this client knows its own player id (set by setRoom above).
           if (res.peerIds?.length) pendingPeerIdsRef.current = res.peerIds;
         }
@@ -356,6 +459,7 @@ export default function App() {
   const handleToggleMic = () => {
     const next = !micMuted;
     setMicMuted(next);
+    updateSeatSession({ micMuted: next });
     socket?.emit('player:mediaState', { micMuted: next, camOff });
   };
 
@@ -365,11 +469,13 @@ export default function App() {
     }
     const next = !camOff;
     setCamOff(next);
+    updateSeatSession({ camOff: next });
     socket?.emit('player:mediaState', { micMuted, camOff: next });
   };
 
   const handleLeaveRoom = () => {
     socket?.emit('room:leave');
+    clearSeatSession();
     closeAllPeers();
     setRoom(null);
     setLivekit(null);
@@ -413,6 +519,32 @@ export default function App() {
     });
   };
 
+  if (!room && rejoining) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-5 bg-[#0F1115] px-6 text-center text-[#F3F4F6]">
+        <BrandLogo />
+        <div className="flex items-center gap-3 text-sm text-[#D1D5DB]" role="status" aria-live="polite">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#5865F2] border-t-transparent" />
+          {t.rejoiningSeat}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            clearSeatSession();
+            playerIdRef.current = null;
+            playerTokenRef.current = null;
+            moderatorTokenRef.current = null;
+            roomCodeRef.current = null;
+            setRejoining(false);
+          }}
+          className="text-xs font-medium text-[#9CA3AF] underline-offset-2 hover:text-white hover:underline"
+        >
+          {t.rejoiningCancel}
+        </button>
+      </div>
+    );
+  }
+
   if (!room) {
     return (
       <>
@@ -455,14 +587,20 @@ export default function App() {
     nightStep: room.nightStep,
     moderatorListeningToGraveyard: moderatorListening,
     deadViewerMutedGraveyard: graveyardMuted,
+    lastWordsPlayerId: room.lastWords?.playerId ?? null,
   };
   const graveyardActive = isGraveyardActive(room.phase);
-  const iAmDead = Boolean(me && isInGraveyard(me, room.phase));
+  const lastWordsId = room.lastWords?.playerId ?? null;
+  const iGiveLastWords = Boolean(me && lastWordsId === me.id);
+  const iAmDead = Boolean(me && isInGraveyard(me, room.phase) && !iGiveLastWords);
   const seesGraveyardRoom = graveyardActive && (room.isMeModerator || iAmDead);
-  const graveyardPlayers = graveyardActive ? seatedPlayers.filter((p) => !p.isAlive) : [];
+  const inGraveyardRoom = (p: (typeof room.players)[number]) =>
+    !p.isModerator && !p.isAlive && graveyardActive && p.id !== lastWordsId;
+  const graveyardPlayers = seatedPlayers.filter(inGraveyardRoom);
   const tablePlayers = seesGraveyardRoom
-    ? visibleSeatedPlayers.filter((p) => p.isAlive)
+    ? visibleSeatedPlayers.filter((p) => !inGraveyardRoom(p))
     : visibleSeatedPlayers;
+  const lastWordsPlayer = lastWordsId ? room.players.find((p) => p.id === lastWordsId) ?? null : null;
 
   const tileDisplayFor = (p: (typeof room.players)[number]): TileDisplay => {
     if (p.id === room.myPlayerId) return 'video';
@@ -494,7 +632,7 @@ export default function App() {
         isMe={isMe}
         isSpeaking={Boolean(speakingMap[player.id]) && hearsThem}
         display={display}
-        ghost={!player.isModerator && isInGraveyard(player, room.phase) && seesGraveyardRoom}
+        ghost={inGraveyardRoom(player) && seesGraveyardRoom}
         viewerIsModerator={room.isMeModerator}
         voteCount={player.isModerator ? 0 : voteTally.counts[player.id] || 0}
         isSelectedTarget={!player.isModerator && selectedTileTargetId === player.id}
@@ -698,6 +836,48 @@ export default function App() {
                 <span className="font-mono text-[#9CA3AF]">
                   {t.aliveCounter}: {aliveSeated.length}/{seatedPlayers.length}
                 </span>
+              </div>
+            </div>
+          )}
+
+          {/* Last words */}
+          {lastWordsPlayer && room.lastWords && (
+            <div
+              role="status"
+              data-testid="last-words"
+              className="shrink-0 border-b border-amber-400/30 bg-amber-500/10 px-3 py-2 sm:px-6 sm:py-2.5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Flame className="h-4 w-4 shrink-0 text-amber-300" />
+                  <span className="font-semibold text-amber-100">
+                    {iGiveLastWords
+                      ? t.lastWordsYou
+                      : `${t.lastWordsTitle}: ${formatSeatNumber(lastWordsPlayer.seatNumber)} ${lastWordsPlayer.nickname}`}
+                  </span>
+                  <span className="font-mono font-bold text-white">
+                    {Math.floor(room.lastWords.secondsLeft / 60)}:
+                    {String(room.lastWords.secondsLeft % 60).padStart(2, '0')}
+                  </span>
+                </div>
+                {room.isMeModerator && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => emitMod('mod:lastWords', { action: 'add' })}
+                      className="h-8 rounded-md border border-white/15 bg-[#1E222B] px-2.5 text-xs font-semibold text-white hover:bg-white/10"
+                    >
+                      {t.lastWordsAdd}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => emitMod('mod:lastWords', { action: 'end' })}
+                      className="h-8 rounded-md bg-amber-500 px-3 text-xs font-bold text-[#1A1206] hover:bg-amber-400"
+                    >
+                      {t.lastWordsEndBtn}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1027,6 +1207,8 @@ export default function App() {
               }
               onKickPlayer={(id) => emitMod('mod:kickPlayer', { targetPlayerId: id })}
               onShuffleSeats={() => emitMod('mod:shuffleSeats')}
+              onSetLastWordsSeconds={(seconds) => emitMod('mod:setLastWordsSeconds', { seconds })}
+              onGiveLastWords={(id) => emitMod('mod:lastWords', { action: 'start', targetPlayerId: id })}
               onTransferModerator={(id) => emitMod('mod:transferModerator', { targetPlayerId: id })}
               onUpdateRoleConfig={(roleConfig: RoleConfig) =>
                 emitMod('mod:updateRoleConfig', { roleConfig })

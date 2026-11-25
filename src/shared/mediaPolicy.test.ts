@@ -66,6 +66,15 @@ test('a dead player can mute the Graveyard and still follow the living', () => {
   assert.deepEqual(perceive(deadB, deadA, day), both, 'others still hear the muter');
 });
 
+test('last words: everyone sees and hears the eliminated speaker, who hears the table', () => {
+  const lw = { ...day, lastWordsPlayerId: deadA.id };
+  assert.deepEqual(perceive(villager, deadA, lw), both);
+  assert.deepEqual(perceive(mafia, deadA, lw), both);
+  assert.deepEqual(perceive(deadA, villager, lw), both);
+  assert.deepEqual(perceive(deadA, deadB, lw), none, 'speaker is not in the Graveyard yet');
+  assert.deepEqual(perceive(villager, deadB, lw), none, 'other dead stay hidden');
+});
+
 test('after the game ends there is no graveyard: everyone talks together', () => {
   assert.deepEqual(perceive(villager, deadA, ended), both);
   assert.deepEqual(perceive(deadA, villager, ended), both);
