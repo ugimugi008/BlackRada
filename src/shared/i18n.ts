@@ -152,6 +152,14 @@ export interface Translations extends LogDictionary {
   lastWordsEndBtn: string;
   lastWordsSetting: string;
   lastWordsOff: string;
+  talkButton: string;
+  talkTitle: string;
+  talkDone: string;
+  talkRemove: string;
+  talkStartHint: string;
+  talkSpeaking: string;
+  talkYou: string;
+  talkSetting: string;
   clearRoles: string;
   noSeatedYet: string;
   shareCodeHint: string;
@@ -354,6 +362,14 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     lastWordsEndBtn: 'End',
     lastWordsSetting: 'Last words',
     lastWordsOff: 'Off',
+    talkButton: 'Call to speak',
+    talkTitle: 'Called to speak',
+    talkDone: 'Spoke',
+    talkRemove: 'Remove from the list',
+    talkStartHint: 'Start speech',
+    talkSpeaking: 'Speech',
+    talkYou: 'Your speech. Everyone is listening.',
+    talkSetting: 'Speech length',
     clearRoles: 'Clear roles',
     noSeatedYet: 'No seated players yet',
     shareCodeHint: 'Share the room code {code} or invite link with your friends.',
@@ -570,6 +586,14 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     lastWordsEndBtn: 'Завершити',
     lastWordsSetting: 'Останнє слово',
     lastWordsOff: 'Вимк.',
+    talkButton: 'На розмову',
+    talkTitle: 'На розмову',
+    talkDone: 'Висловився',
+    talkRemove: 'Прибрати зі списку',
+    talkStartHint: 'Почати промову',
+    talkSpeaking: 'Промова',
+    talkYou: 'Ваша промова. Вас слухають усі.',
+    talkSetting: 'Тривалість промови',
     clearRoles: 'Очистити ролі',
     noSeatedYet: 'Ще немає гравців за столом',
     shareCodeHint: 'Надішліть код {code} або посилання друзям.',

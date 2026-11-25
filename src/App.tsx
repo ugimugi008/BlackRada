@@ -7,6 +7,8 @@ import {
   Copy,
   Crown,
   Flame,
+  MessageCircle,
+  Play,
   Ghost,
   LogOut,
   Maximize,
@@ -244,7 +246,7 @@ export default function App() {
 
   // Last words: spotlight the speaker for everyone, then return to the grid.
   const autoFocusedRef = useRef<string | null>(null);
-  const lastWordsSpeakerId = room?.lastWords?.playerId ?? null;
+  const lastWordsSpeakerId = room?.lastWords?.playerId ?? room?.talk?.playerId ?? null;
   useEffect(() => {
     if (lastWordsSpeakerId) {
       autoFocusedRef.current = lastWordsSpeakerId;
@@ -601,6 +603,14 @@ export default function App() {
     ? visibleSeatedPlayers.filter((p) => !inGraveyardRoom(p))
     : visibleSeatedPlayers;
   const lastWordsPlayer = lastWordsId ? room.players.find((p) => p.id === lastWordsId) ?? null : null;
+  const talkPlayer = room.talk ? room.players.find((p) => p.id === room.talk?.playerId) ?? null : null;
+  const talkStateOf = (playerId: string): 'called' | 'done' | null => {
+    const entry = room.talkList.find((e) => e.playerId === playerId);
+    return entry ? (entry.done ? 'done' : 'called') : null;
+  };
+  const talkEntries = room.talkList
+    .map((e) => ({ ...e, player: room.players.find((p) => p.id === e.playerId) }))
+    .filter((e) => e.player);
 
   const tileDisplayFor = (p: (typeof room.players)[number]): TileDisplay => {
     if (p.id === room.myPlayerId) return 'video';
@@ -632,7 +642,7 @@ export default function App() {
         isMe={isMe}
         isSpeaking={Boolean(speakingMap[player.id]) && hearsThem}
         display={display}
-        ghost={inGraveyardRoom(player) && seesGraveyardRoom}
+        talkState={talkStateOf(player.id)}
         viewerIsModerator={room.isMeModerator}
         voteCount={player.isModerator ? 0 : voteTally.counts[player.id] || 0}
         isSelectedTarget={!player.isModerator && selectedTileTargetId === player.id}
@@ -650,6 +660,11 @@ export default function App() {
           emitMod('mod:setMediaOverride', { targetPlayerId: id, modForceCamHidden: forceHidden })
         }
         onModeratorSetSeat={(id, seatNumber) => emitMod('mod:setSeat', { targetPlayerId: id, seatNumber })}
+        onModeratorToggleTalk={
+          room.phase === 'DAY' || room.phase === 'VOTING'
+            ? (id, on) => emitMod('mod:talkMark', { targetPlayerId: id, on })
+            : undefined
+        }
       />
     );
   };
@@ -878,6 +893,101 @@ export default function App() {
                     </button>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Speech in progress ("На розмову") */}
+          {talkPlayer && room.talk && (
+            <div
+              role="status"
+              data-testid="talk-speech"
+              className="shrink-0 border-b border-sky-400/30 bg-sky-500/10 px-3 py-2 sm:px-6 sm:py-2.5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex min-w-0 items-center gap-2">
+                  <MessageCircle className="h-4 w-4 shrink-0 text-sky-300" />
+                  <span className="font-semibold text-sky-100">
+                    {talkPlayer.id === room.myPlayerId
+                      ? t.talkYou
+                      : `${t.talkSpeaking}: ${formatSeatNumber(talkPlayer.seatNumber)} ${talkPlayer.nickname}`}
+                  </span>
+                  <span className="font-mono font-bold text-white">
+                    {Math.floor(room.talk.secondsLeft / 60)}:{String(room.talk.secondsLeft % 60).padStart(2, '0')}
+                  </span>
+                </div>
+                {room.isMeModerator && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => emitMod('mod:talk', { action: 'add' })}
+                      className="h-8 rounded-md border border-white/15 bg-[#1E222B] px-2.5 text-xs font-semibold text-white hover:bg-white/10"
+                    >
+                      {t.lastWordsAdd}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => emitMod('mod:talk', { action: 'end' })}
+                      className="h-8 rounded-md bg-sky-500 px-3 text-xs font-bold text-[#06121A] hover:bg-sky-400"
+                    >
+                      {t.lastWordsEndBtn}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Who's been called to speak this round */}
+          {talkEntries.length > 0 && (room.phase === 'DAY' || room.phase === 'VOTING') && (
+            <div
+              data-testid="talk-list"
+              className="shrink-0 border-b border-white/10 bg-[#13161C] px-3 py-2 sm:px-6"
+            >
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="mr-1 flex items-center gap-1.5 font-semibold text-sky-200">
+                  <MessageCircle className="h-3.5 w-3.5" />
+                  {t.talkTitle}:
+                </span>
+                {talkEntries.map(({ playerId, done, player }) => {
+                  const label = `${formatSeatNumber(player!.seatNumber)} ${player!.nickname}`;
+                  const live = room.talk?.playerId === playerId;
+                  const chipClass = `flex h-7 items-center gap-1 rounded-full border px-2.5 font-medium ${
+                    live
+                      ? 'border-sky-400 bg-sky-600 text-white'
+                      : done
+                      ? 'border-white/10 bg-white/5 text-[#9CA3AF] line-through decoration-white/40'
+                      : 'border-sky-400/40 bg-sky-500/15 text-sky-100'
+                  }`;
+                  return room.isMeModerator ? (
+                    <span key={playerId} className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => emitMod('mod:talk', { action: live ? 'end' : 'start', targetPlayerId: playerId })}
+                        title={live ? t.lastWordsEndBtn : t.talkStartHint}
+                        aria-label={`${live ? t.lastWordsEndBtn : t.talkStartHint}: ${label}`}
+                        className={`${chipClass} hover:border-sky-300`}
+                      >
+                        {done ? <Check className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                        {label}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => emitMod('mod:talkMark', { targetPlayerId: playerId, on: false })}
+                        aria-label={`${t.talkRemove}: ${label}`}
+                        title={t.talkRemove}
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-[#6B7280] hover:bg-white/10 hover:text-white"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ) : (
+                    <span key={playerId} className={chipClass}>
+                      {done && <Check className="h-3 w-3" />}
+                      {label}
+                    </span>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1208,6 +1318,7 @@ export default function App() {
               onKickPlayer={(id) => emitMod('mod:kickPlayer', { targetPlayerId: id })}
               onShuffleSeats={() => emitMod('mod:shuffleSeats')}
               onSetLastWordsSeconds={(seconds) => emitMod('mod:setLastWordsSeconds', { seconds })}
+              onSetTalkSeconds={(seconds) => emitMod('mod:setTalkSeconds', { seconds })}
               onGiveLastWords={(id) => emitMod('mod:lastWords', { action: 'start', targetPlayerId: id })}
               onTransferModerator={(id) => emitMod('mod:transferModerator', { targetPlayerId: id })}
               onUpdateRoleConfig={(roleConfig: RoleConfig) =>

@@ -87,6 +87,11 @@ interface RoomInternal {
   timerRunning: boolean;
   lastWords: { playerId: string; secondsLeft: number } | null;
   lastWordsSeconds: number;
+  /** Players called out to speak this round ("На розмову"), in call order. */
+  talkList: Array<{ playerId: string; done: boolean }>;
+  /** A called player's speech in progress. */
+  talk: { playerId: string; secondsLeft: number } | null;
+  talkSeconds: number;
   messages: ChatMessage[];
   createdAt: number;
 }
@@ -171,6 +176,8 @@ function resetTableToLobby(room: RoomInternal) {
   room.timerRunning = false;
   room.timerSecondsLeft = 90;
   room.lastWords = null;
+  room.talk = null;
+  room.talkList = [];
   room.players = room.players.map((p) => ({
     ...p,
     isAlive: true,
@@ -217,6 +224,7 @@ function startLastWords(room: RoomInternal, playerId: string) {
   if (room.lastWordsSeconds <= 0 || room.phase === 'ENDED' || room.phase === 'LOBBY') return;
   const p = room.players.find((x) => x.id === playerId && !x.isModerator);
   if (!p) return;
+  endTalk(room);
   room.lastWords = { playerId, secondsLeft: room.lastWordsSeconds };
   room.timerRunning = false; // the discussion timer waits until they're done
   addSystemMessage(room, 'lastWordsStart', {
@@ -224,6 +232,29 @@ function startLastWords(room: RoomInternal, playerId: string) {
     name: p.nickname,
     s: room.lastWordsSeconds,
   });
+}
+
+function startTalk(room: RoomInternal, playerId: string) {
+  const p = room.players.find((x) => x.id === playerId && !x.isModerator && x.isAlive);
+  if (!p) return;
+  room.lastWords = null;
+  endTalk(room);
+  if (!room.talkList.some((e) => e.playerId === playerId)) room.talkList.push({ playerId, done: false });
+  room.talk = { playerId, secondsLeft: room.talkSeconds };
+  room.timerRunning = false;
+  addSystemMessage(room, 'talkStart', {
+    seat: formatSeatNumber(p.seatNumber),
+    name: p.nickname,
+    s: room.talkSeconds,
+  });
+}
+
+/** Finish the current speech and tick that player off the list. */
+function endTalk(room: RoomInternal) {
+  if (!room.talk) return;
+  const entry = room.talkList.find((e) => e.playerId === room.talk?.playerId);
+  if (entry) entry.done = true;
+  room.talk = null;
 }
 
 function endLastWords(room: RoomInternal) {
@@ -296,6 +327,12 @@ async function startServer() {
         broadcastRoomState(io, room);
         continue;
       }
+      if (room.talk) {
+        room.talk.secondsLeft -= 1;
+        if (room.talk.secondsLeft <= 0) endTalk(room);
+        broadcastRoomState(io, room);
+        continue;
+      }
       if (!room.timerRunning) continue;
       if (room.timerSecondsLeft > 0) {
         room.timerSecondsLeft -= 1;
@@ -364,6 +401,9 @@ async function startServer() {
             sheriffCheckId: null,
             doctorSaveId: null,
           },
+          talkList: [],
+          talk: null,
+          talkSeconds: 30,
           lastWords: null,
           lastWordsSeconds: 60,
           lastMorningSummary: null,
@@ -793,6 +833,8 @@ async function startServer() {
           room.players = assignRolesToPlayers(room.players, room.roleConfig);
         }
         room.lastWords = null;
+        room.talk = null;
+        room.talkList = [];
         room.phase = 'NIGHT';
         room.nightNumber += 1;
         room.nightStep = 'SLEEP';
@@ -868,7 +910,6 @@ async function startServer() {
           room.phase = 'DAY';
           room.timerSecondsLeft = 90;
           room.timerRunning = false;
-          if (outcome.eliminatedPlayerId) startLastWords(room, outcome.eliminatedPlayerId);
         }
       })
     );
@@ -887,6 +928,7 @@ async function startServer() {
       'mod:startVoting',
       withModerator((room) => {
         room.lastWords = null;
+        endTalk(room);
         room.phase = 'VOTING';
         room.votes = {};
         room.timerRunning = false;
@@ -910,6 +952,7 @@ async function startServer() {
           const victim = room.players.find((p) => p.id === targetId && !p.isModerator);
           if (victim) {
             victim.isAlive = false;
+            room.talkList = room.talkList.filter((e) => e.playerId !== victim.id);
             const summary: LogEntry = {
               key: 'votedOut',
               params: { seat: formatSeatNumber(victim.seatNumber), name: victim.nickname },
@@ -943,6 +986,7 @@ async function startServer() {
         room.phase = 'ENDED';
         room.timerRunning = false;
         room.lastWords = null;
+        room.talk = null;
         addSystemMessage(room, 'roundEnded');
       })
     );
@@ -1022,6 +1066,46 @@ async function startServer() {
             room.lastWordsSeconds = saved;
           }
         }
+      })
+    );
+
+    socket.on(
+      'mod:talkMark',
+      withModerator((room, _mod, payload) => {
+        const targetId = String(payload.targetPlayerId || '');
+        const target = room.players.find((p) => p.id === targetId && !p.isModerator && p.isAlive);
+        if (!target) return;
+        const listed = room.talkList.some((e) => e.playerId === targetId);
+        if (payload.on === false) {
+          if (room.talk?.playerId === targetId) room.talk = null;
+          room.talkList = room.talkList.filter((e) => e.playerId !== targetId);
+        } else if (!listed) {
+          room.talkList.push({ playerId: targetId, done: false });
+          addSystemMessage(room, 'talkCalled', {
+            seat: formatSeatNumber(target.seatNumber),
+            name: target.nickname,
+          });
+        }
+      })
+    );
+
+    socket.on(
+      'mod:talk',
+      withModerator((room, _mod, payload) => {
+        const action = String(payload.action || '');
+        if (action === 'start') startTalk(room, String(payload.targetPlayerId || ''));
+        else if (action === 'end') endTalk(room);
+        else if (action === 'add' && room.talk) {
+          room.talk.secondsLeft = Math.min(300, room.talk.secondsLeft + 30);
+        }
+      })
+    );
+
+    socket.on(
+      'mod:setTalkSeconds',
+      withModerator((room, _mod, payload) => {
+        const secs = Number(payload.seconds);
+        if ([30, 60, 90].includes(secs)) room.talkSeconds = secs;
       })
     );
 

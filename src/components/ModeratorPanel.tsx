@@ -4,6 +4,7 @@ import {
   Check,
   Crown,
   Flame,
+  MessageCircle,
   EyeOff,
   Gavel,
   MessageSquare,
@@ -42,6 +43,7 @@ interface ModeratorPanelProps {
   onMoveSeat: (playerId: string, direction: 'up' | 'down') => void;
   onShuffleSeats: () => void;
   onSetLastWordsSeconds: (seconds: number) => void;
+  onSetTalkSeconds: (seconds: number) => void;
   onGiveLastWords: (playerId: string) => void;
   onKickPlayer: (playerId: string) => void;
   onTransferModerator: (playerId: string) => void;
@@ -72,6 +74,7 @@ export function ModeratorPanel({
   onMoveSeat,
   onShuffleSeats,
   onSetLastWordsSeconds,
+  onSetTalkSeconds,
   onGiveLastWords,
   onKickPlayer,
   onTransferModerator,
@@ -414,6 +417,34 @@ export function ModeratorPanel({
                   {secs}s
                 </button>
               ))}
+            </div>
+          </section>
+
+          {/* Speech length for "На розмову" */}
+          <section aria-label={t.talkSetting} className="border-t border-white/10 pt-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
+                <MessageCircle className="h-3.5 w-3.5 text-sky-300" />
+                {t.talkSetting}
+              </h3>
+              <div className="flex items-center gap-1" role="radiogroup" aria-label={t.talkSetting}>
+                {[30, 60, 90].map((secs) => (
+                  <button
+                    key={secs}
+                    type="button"
+                    role="radio"
+                    aria-checked={room.talkSeconds === secs}
+                    onClick={() => onSetTalkSeconds(secs)}
+                    className={`h-8 rounded-md border px-2.5 font-mono text-xs ${
+                      room.talkSeconds === secs
+                        ? 'border-sky-400/50 bg-sky-500/20 text-sky-100'
+                        : 'border-white/10 bg-[#0F1115] text-[#D1D5DB] hover:bg-white/10'
+                    }`}
+                  >
+                    {secs}s
+                  </button>
+                ))}
+              </div>
             </div>
           </section>
 

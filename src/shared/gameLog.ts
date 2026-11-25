@@ -35,6 +35,8 @@ export type LogKey =
   | 'seatChanged'
   | 'lastWordsStart'
   | 'lastWordsEnd'
+  | 'talkCalled'
+  | 'talkStart'
   // Private feedback & errors (not table log lines, same translation path)
   | 'fbMarked'
   | 'fbIsSheriff'
@@ -92,6 +94,8 @@ export const LOG_EN: LogDictionary = {
     seatChanged: 'Moderator moved {name} to Seat {seat}.',
     lastWordsStart: 'Last words: Seat {seat} ({name}), {s} seconds.',
     lastWordsEnd: 'Last words are over.',
+    talkCalled: 'Called to speak: Seat {seat} ({name}).',
+    talkStart: 'Speech: Seat {seat} ({name}), {s} seconds.',
     fbMarked: 'Marked {name} for tonight.',
     fbIsSheriff: '{name} is the Sheriff!',
     fbNotSheriff: '{name} is not the Sheriff.',
@@ -139,6 +143,8 @@ export const LOG_UK: LogDictionary = {
     seatChanged: 'Ведучий пересаджує {name} на місце {seat}.',
     lastWordsStart: 'Останнє слово: місце {seat} ({name}), {s} с.',
     lastWordsEnd: 'Останнє слово завершено.',
+    talkCalled: 'На розмову: місце {seat} ({name}).',
+    talkStart: 'Промова: місце {seat} ({name}), {s} с.',
     fbMarked: 'Ціль на цю ніч: {name}.',
     fbIsSheriff: '{name} — Шериф!',
     fbNotSheriff: '{name} — не Шериф.',

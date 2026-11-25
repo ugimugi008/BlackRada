@@ -72,6 +72,11 @@ export interface RoomPublicState {
   lastWords: LastWords | null;
   /** Length of last words for this table; 0 = off. */
   lastWordsSeconds: number;
+  /** Players called out to speak this round ("На розмову"), in call order. */
+  talkList: Array<{ playerId: string; done: boolean }>;
+  /** A called player's speech in progress. */
+  talk: LastWords | null;
+  talkSeconds: number;
   myPlayerId: string;
   myRole: MafiaRole | null;
   isMeModerator: boolean;
@@ -367,6 +372,9 @@ export function redactRoomForViewer(
     timerRunning: boolean;
     lastWords?: LastWords | null;
     lastWordsSeconds?: number;
+    talkList?: Array<{ playerId: string; done: boolean }>;
+    talk?: LastWords | null;
+    talkSeconds?: number;
     messages: ChatMessage[];
   },
   viewerId: string
@@ -430,6 +438,9 @@ export function redactRoomForViewer(
     timerRunning: room.timerRunning,
     lastWords: room.lastWords ?? null,
     lastWordsSeconds: room.lastWordsSeconds ?? 60,
+    talkList: room.talkList ?? [],
+    talk: room.talk ?? null,
+    talkSeconds: room.talkSeconds ?? 30,
     myPlayerId: viewerId,
     myRole: viewer?.role ?? null,
     isMeModerator,

@@ -2,8 +2,8 @@ import {
   CameraOff,
   Check,
   EyeOff,
-  Ghost,
   Maximize2,
+  MessageCircle,
   MicOff,
   Minimize2,
   Pencil,
@@ -33,8 +33,8 @@ interface WebcamTileProps {
   isMe: boolean;
   isSpeaking: boolean;
   display: TileDisplay;
-  /** Eliminated player shown to the Graveyard or the Moderator. */
-  ghost?: boolean;
+  /** "На розмову": called to speak this round, or already spoke. */
+  talkState?: 'called' | 'done' | null;
   viewerIsModerator: boolean;
   voteCount: number;
   isSelectedTarget: boolean;
@@ -48,6 +48,7 @@ interface WebcamTileProps {
   onModeratorToggleMute?: (playerId: string, forceMuted: boolean) => void;
   onModeratorToggleCamHide?: (playerId: string, forceHidden: boolean) => void;
   onModeratorSetSeat?: (playerId: string, seatNumber: number) => void;
+  onModeratorToggleTalk?: (playerId: string, on: boolean) => void;
 }
 
 export function WebcamTile({
@@ -57,7 +58,7 @@ export function WebcamTile({
   isMe,
   isSpeaking,
   display,
-  ghost = false,
+  talkState = null,
   viewerIsModerator,
   voteCount,
   isSelectedTarget,
@@ -71,6 +72,7 @@ export function WebcamTile({
   onModeratorToggleMute,
   onModeratorToggleCamHide,
   onModeratorSetSeat,
+  onModeratorToggleTalk,
 }: WebcamTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // Upright phone video is shown whole (dark bars at the sides, like Discord)
@@ -122,13 +124,9 @@ export function WebcamTile({
   const borderClass = isSelectedTarget
     ? 'border-[#5865F2] ring-2 ring-[#5865F2]/50'
     : isSpeaking && !effectiveMuted && !hiddenFromViewer
-    ? ghost
-      ? 'border-violet-400 ring-2 ring-violet-400/50'
-      : 'border-[#10B981] ring-2 ring-[#10B981]/50'
-    : ghost
-    ? 'border-violet-500/30'
-    : !player.isAlive
-    ? 'border-white/5 opacity-60'
+    ? 'border-[#10B981] ring-2 ring-[#10B981]/50'
+    : talkState === 'called'
+    ? 'border-sky-400/60'
     : 'border-white/10';
 
   const sizeClass =
@@ -144,11 +142,9 @@ export function WebcamTile({
       data-player-id={player.id}
       data-display={display}
       onDoubleClick={() => onToggleFocus?.(player.id)}
-      className={`group relative flex flex-col overflow-hidden rounded-xl border transition-colors ${
-        ghost ? 'bg-[#1A1626]' : 'bg-[#161920]'
-      } ${sizeClass} ${borderClass}`}
+      className={`group relative flex flex-col overflow-hidden rounded-xl border bg-[#161920] transition-colors ${sizeClass} ${borderClass}`}
     >
-      <div className={`relative h-full w-full ${ghost ? 'bg-[#120F1C]' : 'bg-[#0E1015]'}`}>
+      <div className="relative h-full w-full bg-[#0E1015]">
         {showVideo ? (
           <video
             ref={videoRef}
@@ -158,7 +154,7 @@ export function WebcamTile({
             data-fit={size === 'focus' || isPortrait ? 'contain' : 'cover'}
             className={`h-full w-full ${size === 'focus' || isPortrait ? 'object-contain' : 'object-cover'} ${
               isMe ? '-scale-x-100' : ''
-            } ${ghost ? 'grayscale-[60%] saturate-50' : !player.isAlive ? 'grayscale brightness-75' : ''}`}
+            }`}
           />
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2">
@@ -168,16 +164,12 @@ export function WebcamTile({
               } items-center justify-center rounded-full border font-bold ${
                 player.isModerator
                   ? 'border-[#5865F2]/40 bg-[#5865F2]/15 text-[#C7D2FE]'
-                  : ghost
-                  ? 'border-violet-400/30 bg-violet-500/10 text-violet-200'
                   : !player.isAlive
                   ? 'border-white/10 bg-white/5 text-[#6B7280]'
                   : 'border-white/15 bg-[#1E222B] text-white'
               }`}
             >
-              {ghost ? (
-                <Ghost className="h-5 w-5 sm:h-6 sm:w-6" />
-              ) : !player.isAlive ? (
+              {!player.isAlive ? (
                 <Skull className="h-5 w-5 text-rose-400 sm:h-6 sm:w-6" />
               ) : (
                 initial
@@ -235,13 +227,15 @@ export function WebcamTile({
               {!isSmall && <span>{t.moderatorBadge}</span>}
             </span>
           )}
-          {!player.isAlive && !isSmall && (
+          {talkState && (
             <span
-              className={`rounded px-1.5 py-0.5 text-[10px] sm:text-[11px] ${
-                ghost ? 'bg-violet-950/90 text-violet-200' : 'bg-rose-950/90 text-rose-200'
+              title={talkState === 'called' ? t.talkTitle : t.talkDone}
+              className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] sm:text-[11px] ${
+                talkState === 'called' ? 'bg-sky-600/90 text-white' : 'bg-black/70 text-sky-200'
               }`}
             >
-              {ghost ? t.graveyardTitle : t.eliminatedBadge}
+              {talkState === 'called' ? <MessageCircle className="h-3 w-3" /> : <Check className="h-3 w-3" />}
+              {!isSmall && <span>{talkState === 'called' ? t.talkTitle : t.talkDone}</span>}
             </span>
           )}
           {!player.isConnected && !isSmall && (
@@ -267,6 +261,22 @@ export function WebcamTile({
             >
               {t.roles[player.role].label}
             </span>
+          )}
+          {onModeratorToggleTalk && viewerIsModerator && !player.isModerator && player.isAlive && (
+            <button
+              type="button"
+              onClick={() => onModeratorToggleTalk(player.id, !talkState)}
+              aria-pressed={Boolean(talkState)}
+              aria-label={`${t.talkButton}: ${player.nickname}`}
+              title={talkState ? t.talkRemove : t.talkButton}
+              className={`pointer-events-auto flex h-7 w-7 items-center justify-center rounded-md border ${
+                talkState
+                  ? 'border-sky-400/60 bg-sky-600 text-white hover:bg-sky-500'
+                  : 'border-white/15 bg-black/70 text-white hover:bg-sky-600 sm:opacity-60 sm:group-hover:opacity-100'
+              }`}
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+            </button>
           )}
           {onToggleFocus && (
             <button
@@ -359,7 +369,8 @@ export function WebcamTile({
           ) : (
             <>
               <span
-                className={`min-w-0 truncate font-semibold text-white ${
+                aria-label={!player.isAlive ? `${player.nickname} (${t.eliminatedBadge})` : undefined}
+                className={`min-w-0 truncate font-semibold ${player.isAlive ? 'text-white' : 'text-rose-400'} ${
                   size === 'focus' ? 'text-sm' : isSmall ? 'text-[11px]' : 'text-xs'
                 }`}
               >
