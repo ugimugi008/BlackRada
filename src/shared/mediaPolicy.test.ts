@@ -58,6 +58,14 @@ test('graveyard: Moderator sees the dead but hears them only when tuned in', () 
   assert.deepEqual(perceive(mod, deadA, { ...day, moderatorListeningToGraveyard: true }), both);
 });
 
+test('a dead player can mute the Graveyard and still follow the living', () => {
+  const muted = { ...day, deadViewerMutedGraveyard: true };
+  assert.deepEqual(perceive(deadA, deadB, muted), { see: true, hear: false });
+  assert.deepEqual(perceive(deadA, villager, muted), both);
+  assert.deepEqual(perceive(deadA, mod, muted), both);
+  assert.deepEqual(perceive(deadB, deadA, day), both, 'others still hear the muter');
+});
+
 test('after the game ends there is no graveyard: everyone talks together', () => {
   assert.deepEqual(perceive(villager, deadA, ended), both);
   assert.deepEqual(perceive(deadA, villager, ended), both);

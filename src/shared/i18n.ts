@@ -141,6 +141,11 @@ export interface Translations extends LogDictionary {
   graveyardListenHint: string;
   graveyardPlaceholder: string;
   graveyardChatNote: string;
+  muteGraveyard: string;
+  unmuteGraveyard: string;
+  muteGraveyardHint: string;
+  showGraveyard: string;
+  hideGraveyard: string;
   clearRoles: string;
   noSeatedYet: string;
   shareCodeHint: string;
@@ -342,6 +347,11 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     graveyardListenHint: 'Only you hear them. Living players never do.',
     graveyardPlaceholder: 'Message the Graveyard…',
     graveyardChatNote: 'Only eliminated players and the Moderator see this.',
+    muteGraveyard: 'Mute Graveyard',
+    unmuteGraveyard: 'Unmute Graveyard',
+    muteGraveyardHint: "Focus on the game: you won't hear other eliminated players. They can still hear you.",
+    showGraveyard: 'Show Graveyard',
+    hideGraveyard: 'Hide Graveyard',
     clearRoles: 'Clear roles',
     noSeatedYet: 'No seated players yet',
     shareCodeHint: 'Share the room code {code} or invite link with your friends.',
@@ -559,6 +569,11 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     graveyardListenHint: 'Їх чуєте лише ви. Живі гравці — ніколи.',
     graveyardPlaceholder: 'Повідомлення на цвинтар…',
     graveyardChatNote: 'Це бачать лише вибулі гравці та Ведучий.',
+    muteGraveyard: 'Вимкнути звук цвинтаря',
+    unmuteGraveyard: 'Увімкнути звук цвинтаря',
+    muteGraveyardHint: 'Зосередьтеся на грі: ви не чутимете інших вибулих. Вони вас чують.',
+    showGraveyard: 'Показати цвинтар',
+    hideGraveyard: 'Сховати цвинтар',
     clearRoles: 'Очистити ролі',
     noSeatedYet: 'Ще немає гравців за столом',
     shareCodeHint: 'Надішліть код {code} або посилання друзям.',

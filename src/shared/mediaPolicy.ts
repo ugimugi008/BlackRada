@@ -26,6 +26,8 @@ export interface MediaContext {
   nightStep: NightStep;
   /** Moderator has tuned in to the Graveyard (local, per Moderator). */
   moderatorListeningToGraveyard: boolean;
+  /** An eliminated viewer chose to mute the Graveyard to focus on the game (local). */
+  deadViewerMutedGraveyard?: boolean;
 }
 
 export interface Perception {
@@ -60,7 +62,7 @@ export function perceive(viewer: MediaPerson | null, target: MediaPerson, ctx: M
   const viewerDead = isInGraveyard(viewer, phase);
 
   if (targetDead) {
-    if (viewerDead) return { see: true, hear: true };
+    if (viewerDead) return { see: true, hear: !ctx.deadViewerMutedGraveyard };
     if (viewer.isModerator) return { see: true, hear: ctx.moderatorListeningToGraveyard };
     return { see: false, hear: false };
   }

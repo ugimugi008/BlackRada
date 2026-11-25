@@ -3,6 +3,7 @@ import {
   Camera,
   CameraOff,
   Check,
+  ChevronRight,
   Copy,
   Crown,
   Ghost,
@@ -81,6 +82,8 @@ export default function App() {
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [moderatorListening, setModeratorListening] = useState(false);
+  const [graveyardOpen, setGraveyardOpen] = useState(false); // Moderator: collapsed by default
+  const [graveyardMuted, setGraveyardMuted] = useState(false); // eliminated player: focus on the game
   const [isFullscreen, setIsFullscreen] = useState(false);
   const focusStageRef = useRef<HTMLDivElement | null>(null);
   const pendingPeerIdsRef = useRef<string[] | null>(null);
@@ -162,7 +165,11 @@ export default function App() {
   // Drop focus if that player left; stop Graveyard listening once the game is over.
   useEffect(() => {
     if (focusedId && room && !room.players.some((p) => p.id === focusedId)) setFocusedId(null);
-    if (room && !isGraveyardActive(room.phase)) setModeratorListening(false);
+    if (room && !isGraveyardActive(room.phase)) {
+      setModeratorListening(false);
+      setGraveyardOpen(false);
+      setGraveyardMuted(false);
+    }
   }, [room, focusedId]);
 
   const toggleFullscreen = useCallback(() => {
@@ -424,6 +431,7 @@ export default function App() {
     phase: room.phase,
     nightStep: room.nightStep,
     moderatorListeningToGraveyard: moderatorListening,
+    deadViewerMutedGraveyard: graveyardMuted,
   };
   const graveyardActive = isGraveyardActive(room.phase);
   const iAmDead = Boolean(me && isInGraveyard(me, room.phase));
@@ -774,12 +782,29 @@ export default function App() {
                   data-testid="graveyard"
                   className="rounded-xl border border-violet-500/25 bg-violet-950/15 p-3"
                 >
-                  <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-200">
-                      <Ghost className="h-4 w-4" />
-                      {t.graveyardTitle} ({graveyardPlayers.length})
-                    </h3>
-                    {room.isMeModerator && (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {room.isMeModerator ? (
+                      <button
+                        type="button"
+                        onClick={() => setGraveyardOpen((v) => !v)}
+                        aria-expanded={graveyardOpen}
+                        aria-label={graveyardOpen ? t.hideGraveyard : t.showGraveyard}
+                        title={graveyardOpen ? t.hideGraveyard : t.showGraveyard}
+                        className="flex items-center gap-2 rounded-md py-1 pr-2 text-xs font-bold uppercase tracking-wider text-violet-200 hover:text-white"
+                      >
+                        <ChevronRight
+                          className={`h-4 w-4 transition-transform ${graveyardOpen ? 'rotate-90' : ''}`}
+                        />
+                        <Ghost className="h-4 w-4" />
+                        {t.graveyardTitle} ({graveyardPlayers.length})
+                      </button>
+                    ) : (
+                      <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-200">
+                        <Ghost className="h-4 w-4" />
+                        {t.graveyardTitle} ({graveyardPlayers.length})
+                      </h3>
+                    )}
+                    {room.isMeModerator ? (
                       <button
                         type="button"
                         aria-pressed={moderatorListening}
@@ -794,15 +819,34 @@ export default function App() {
                         {moderatorListening ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
                         {moderatorListening ? t.stopListenGraveyard : t.listenGraveyard}
                       </button>
+                    ) : (
+                      <button
+                        type="button"
+                        aria-pressed={graveyardMuted}
+                        onClick={() => setGraveyardMuted((v) => !v)}
+                        title={t.muteGraveyardHint}
+                        className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold ${
+                          graveyardMuted
+                            ? 'border-amber-400/40 bg-amber-500/15 text-amber-100 hover:bg-amber-500/25'
+                            : 'border-white/15 bg-[#1E222B] text-[#D1D5DB] hover:bg-white/10'
+                        }`}
+                      >
+                        {graveyardMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+                        {graveyardMuted ? t.unmuteGraveyard : t.muteGraveyard}
+                      </button>
                     )}
                   </div>
-                  {graveyardPlayers.length === 0 ? (
-                    <p className="py-3 text-center text-xs text-violet-200/60">{t.graveyardEmpty}</p>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-2 sm:gap-3.5 md:grid-cols-3 xl:grid-cols-4">
-                      {graveyardPlayers.map((player) => renderTile(player, 'grid'))}
-                    </div>
+                  {!room.isMeModerator && graveyardMuted && (
+                    <p className="mt-1.5 text-[11px] text-amber-100/80">{t.muteGraveyardHint}</p>
                   )}
+                  {(!room.isMeModerator || graveyardOpen) &&
+                    (graveyardPlayers.length === 0 ? (
+                      <p className="py-3 text-center text-xs text-violet-200/60">{t.graveyardEmpty}</p>
+                    ) : (
+                      <div className="mt-2.5 grid grid-cols-2 gap-2 sm:gap-3.5 md:grid-cols-3 xl:grid-cols-4">
+                        {graveyardPlayers.map((player) => renderTile(player, 'grid'))}
+                      </div>
+                    ))}
                 </section>
               )}
 
