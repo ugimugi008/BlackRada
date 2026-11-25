@@ -73,6 +73,9 @@ export function WebcamTile({
   onModeratorSetSeat,
 }: WebcamTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Upright phone video is shown whole (dark bars at the sides, like Discord)
+  // instead of being cropped and zoomed to fill a landscape tile.
+  const [isPortrait, setIsPortrait] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [editingSeat, setEditingSeat] = useState(false);
   const [draftName, setDraftName] = useState(player.nickname);
@@ -89,6 +92,17 @@ export function WebcamTile({
     const el = videoRef.current;
     if (!el) return;
     el.srcObject = showVideo ? stream : null;
+    const measure = () => {
+      if (el.videoWidth && el.videoHeight) setIsPortrait(el.videoHeight > el.videoWidth);
+    };
+    measure();
+    // 'resize' fires when the sender rotates their phone mid-call.
+    el.addEventListener('loadedmetadata', measure);
+    el.addEventListener('resize', measure);
+    return () => {
+      el.removeEventListener('loadedmetadata', measure);
+      el.removeEventListener('resize', measure);
+    };
   }, [stream, showVideo]);
 
   const isSmall = size === 'strip';
@@ -141,7 +155,8 @@ export function WebcamTile({
             autoPlay
             playsInline
             muted // sound is played by the shared audio layer, never by tiles
-            className={`h-full w-full ${size === 'focus' ? 'object-contain' : 'object-cover'} ${
+            data-fit={size === 'focus' || isPortrait ? 'contain' : 'cover'}
+            className={`h-full w-full ${size === 'focus' || isPortrait ? 'object-contain' : 'object-cover'} ${
               isMe ? '-scale-x-100' : ''
             } ${ghost ? 'grayscale-[60%] saturate-50' : !player.isAlive ? 'grayscale brightness-75' : ''}`}
           />
