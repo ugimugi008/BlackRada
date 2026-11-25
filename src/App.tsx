@@ -14,7 +14,6 @@ import {
   Minimize,
   Moon,
   PanelRight,
-  Server,
   Sun,
   Trophy,
   Volume2,
@@ -24,13 +23,12 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import { HostGuideModal } from './components/HostGuideModal';
 import { JoinScreen } from './components/JoinScreen';
 import { ModeratorPanel } from './components/ModeratorPanel';
 import { PlayerSidePanel } from './components/PlayerSidePanel';
 import { RemoteAudio } from './components/RemoteAudio';
 import { WebcamTile, type TileDisplay, type TileSize } from './components/WebcamTile';
-import { useMediaRoom, type LiveKitCredentials } from './hooks/useMediaRoom';
+import { useMediaRoom, type LiveKitCredentials, type RemotePref } from './hooks/useMediaRoom';
 import { formatLog, type LogEntry } from './shared/gameLog';
 import { TRANSLATIONS, formatPhaseLabel, type Language } from './shared/i18n';
 import { isAwakeForMedia, isGraveyardActive, isInGraveyard, perceive } from './shared/mediaPolicy';
@@ -78,7 +76,6 @@ export default function App() {
   const [noiseFilterEnabled, setNoiseFilterEnabled] = useState(true);
   const [seatFilter, setSeatFilter] = useState<'all' | 'alive'>('all');
   const [copiedInvite, setCopiedInvite] = useState(false);
-  const [hostGuideOpen, setHostGuideOpen] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [moderatorListening, setModeratorListening] = useState(false);
@@ -119,6 +116,33 @@ export default function App() {
   const effectiveMicMuted = Boolean(micMuted || me?.modForceMuted || !mediaAwake);
   const effectiveCamOff = Boolean(camOff || me?.modForceCamHidden || !mediaAwake);
 
+  // What to receive from each remote player (LiveKit mode): nothing for people this
+  // viewer may not see/hear, and a video layer sized to how big their tile is.
+  const remotePrefs = useMemo(() => {
+    const prefs: Record<string, RemotePref> = {};
+    if (!room || !me) return prefs;
+    const ctx = {
+      phase: room.phase,
+      nightStep: room.nightStep,
+      moderatorListeningToGraveyard: moderatorListening,
+      deadViewerMutedGraveyard: graveyardMuted,
+    };
+    const narrow = typeof window !== 'undefined' && window.innerWidth < 768;
+    const gridTiles = room.players.filter((p) => seatFilter === 'all' || p.isAlive || p.isModerator).length;
+    const gridQuality: RemotePref['video'] = gridTiles <= 4 ? 'high' : narrow && gridTiles > 6 ? 'low' : 'medium';
+    for (const p of room.players) {
+      if (p.id === me.id) continue;
+      const perc = perceive(me, p, ctx);
+      let video: RemotePref['video'] = gridQuality;
+      if (!perc.see || p.camOff || p.modForceCamHidden) video = 'off';
+      else if (focusedId) video = focusedId === p.id ? 'high' : 'low';
+      else if (me.isModerator && isInGraveyard(p, room.phase) && !graveyardOpen) video = 'off';
+      else if (seatFilter === 'alive' && !p.isAlive && !p.isModerator) video = 'off';
+      prefs[p.id] = { video, audio: perc.hear };
+    }
+    return prefs;
+  }, [room, me, focusedId, moderatorListening, graveyardMuted, graveyardOpen, seatFilter]);
+
   const {
     localStream,
     remoteStreams,
@@ -135,6 +159,7 @@ export default function App() {
     effectiveMicMuted,
     effectiveCamOff,
     noiseFilterEnabled,
+    remotePrefs,
   });
 
   // Peer-to-peer mode: dial the existing players only after our own id is known;
@@ -411,9 +436,7 @@ export default function App() {
           }}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
-          onOpenHostGuide={() => setHostGuideOpen(true)}
         />
-        <HostGuideModal open={hostGuideOpen} t={t} onClose={() => setHostGuideOpen(false)} />
       </>
     );
   }
@@ -679,7 +702,7 @@ export default function App() {
             </div>
           )}
 
-          {/* Webcam Grid Toolbar for 7-16 players on phones */}
+          {/* Webcam Grid Toolbar for larger tables on phones */}
           {seatedPlayers.length >= 4 && (
             <div className="shrink-0 flex items-center justify-between border-b border-white/10 bg-[#0F1115] px-3 py-2 sm:px-6">
               <span className="text-xs text-[#9CA3AF]">
@@ -943,15 +966,6 @@ export default function App() {
               <div className="flex items-center gap-1 sm:gap-2">
                 <button
                   type="button"
-                  onClick={() => setHostGuideOpen(true)}
-                  className="hidden sm:flex h-10 items-center gap-1.5 rounded-lg border border-white/10 bg-[#1E222B] px-3 text-xs font-semibold text-[#D1D5DB] hover:bg-white/10 whitespace-nowrap"
-                >
-                  <Server className="h-3.5 w-3.5 text-[#5865F2]" />
-                  <span>{t.selfHostShort}</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => setMobilePanelOpen((v) => !v)}
                   className="flex lg:hidden h-10 items-center gap-1.5 rounded-lg border border-white/10 bg-[#1E222B] px-2.5 text-xs font-semibold text-white whitespace-nowrap"
                 >
@@ -1076,7 +1090,6 @@ export default function App() {
         </div>
       </div>
 
-      <HostGuideModal open={hostGuideOpen} t={t} onClose={() => setHostGuideOpen(false)} />
     </div>
   );
 }

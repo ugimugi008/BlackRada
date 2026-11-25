@@ -1,7 +1,7 @@
 <div align="center">
   <img src="public/black-rada-mark.svg" width="140" alt="Black Rada crest" />
   <h1>Black Rada</h1>
-  <p>Live webcam Mafia for 7–16 friends, with a dedicated Moderator console. Ukrainian &amp; English.</p>
+  <p>Live webcam Mafia for friends, with a dedicated Moderator console. Ukrainian &amp; English.</p>
 </div>
 
 ## Run locally

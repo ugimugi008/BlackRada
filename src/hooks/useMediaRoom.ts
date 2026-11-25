@@ -3,6 +3,7 @@ import {
   RoomEvent,
   Track,
   VideoPresets,
+  VideoQuality,
   type RemoteParticipant,
   type RemoteTrack,
   type RemoteTrackPublication,
@@ -15,6 +16,42 @@ const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
 ];
+
+/** What this viewer wants to receive from one remote player (LiveKit mode). */
+export type RemoteVideoPref = 'off' | 'low' | 'medium' | 'high';
+export interface RemotePref {
+  video: RemoteVideoPref;
+  audio: boolean;
+}
+
+const VIDEO_QUALITY: Record<Exclude<RemoteVideoPref, 'off'>, VideoQuality> = {
+  low: VideoQuality.LOW, // 180p layer
+  medium: VideoQuality.MEDIUM, // 360p layer
+  high: VideoQuality.HIGH, // 720p layer
+};
+
+// Publish 720p with 360p and 180p simulcast layers; the server forwards each
+// viewer only the layer they asked for (dynacast stops layers nobody needs).
+const CAMERA_PUBLISH = {
+  source: Track.Source.Camera,
+  simulcast: true,
+  videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 30 },
+  videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+};
+
+/** Peer-to-peer mesh sends a separate copy to every peer, so keep it light. */
+function tuneMeshVideoSender(sender: RTCRtpSender) {
+  if (sender.track?.kind !== 'video') return;
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+    params.encodings[0].scaleResolutionDownBy = 2;
+    params.encodings[0].maxBitrate = 600_000;
+    sender.setParameters(params).catch(() => {});
+  } catch {
+    // Older browsers: keep defaults
+  }
+}
 
 export interface LiveKitCredentials {
   url: string;
@@ -29,6 +66,8 @@ interface UseMediaRoomOptions {
   effectiveMicMuted: boolean;
   effectiveCamOff: boolean;
   noiseFilterEnabled: boolean;
+  /** Per remote player: which video quality to receive and whether to receive audio. */
+  remotePrefs?: Record<string, RemotePref>;
 }
 
 export function useMediaRoom({
@@ -39,6 +78,7 @@ export function useMediaRoom({
   effectiveMicMuted,
   effectiveCamOff,
   noiseFilterEnabled,
+  remotePrefs,
 }: UseMediaRoomOptions) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
@@ -92,9 +132,9 @@ export function useMediaRoom({
             : false,
           video: wantVideo
             ? {
-                width: { ideal: 640 },
-                height: { ideal: 360 },
-                frameRate: { ideal: 24, max: 30 },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                frameRate: { ideal: 30, max: 30 },
                 facingMode: 'user',
               }
             : false,
@@ -177,6 +217,20 @@ export function useMediaRoom({
     }
   }, [effectiveMicMuted, effectiveCamOff, localStream]);
 
+  // Latest per-player receive preferences (read inside LiveKit event handlers).
+  const prefsRef = useRef<Record<string, RemotePref> | undefined>(remotePrefs);
+  prefsRef.current = remotePrefs;
+  const prefsKey = JSON.stringify(remotePrefs ?? {});
+
+  useEffect(() => {
+    const lkRoom = lkRoomRef.current;
+    if (!lkRoom || !sfuConnected) return;
+    lkRoom.remoteParticipants.forEach((participant) => {
+      const pref = prefsRef.current?.[participant.identity];
+      participant.trackPublications.forEach((pub) => applyPref(pub, pref));
+    });
+  }, [prefsKey, sfuConnected]);
+
   // Connect to LiveKit SFU when credentials are provided by server
   useEffect(() => {
     if (!livekit || !roomCode || !myPlayerId) {
@@ -184,14 +238,19 @@ export function useMediaRoom({
       return;
     }
 
+    // adaptiveStream must stay OFF: it sizes video by elements attached through
+    // LiveKit, and our tiles use their own <video> elements, so it treated every
+    // remote camera as hidden (paused / lowest quality). We request quality per
+    // tile ourselves via remotePrefs instead.
     const lkRoom = new Room({
-      adaptiveStream: true,
+      adaptiveStream: false,
       dynacast: true,
       videoCaptureDefaults: {
-        resolution: VideoPresets.h540.resolution,
+        resolution: VideoPresets.h720.resolution,
       },
       publishDefaults: {
         simulcast: true,
+        videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
       },
     });
     lkRoomRef.current = lkRoom;
@@ -215,7 +274,8 @@ export function useMediaRoom({
 
     lkRoom.on(
       RoomEvent.TrackSubscribed,
-      (_track: RemoteTrack, _pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+      (_track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
+        applyPref(pub, prefsRef.current?.[participant.identity]);
         syncRemoteParticipant(participant);
       }
     );
@@ -259,9 +319,7 @@ export function useMediaRoom({
               .catch(() => {});
           }
           if (videoTrack) {
-            await lkRoom.localParticipant
-              .publishTrack(videoTrack, { source: Track.Source.Camera, simulcast: true })
-              .catch(() => {});
+            await lkRoom.localParticipant.publishTrack(videoTrack, CAMERA_PUBLISH).catch(() => {});
           }
         }
       })
@@ -291,9 +349,7 @@ export function useMediaRoom({
         .catch(() => {});
     }
     if (videoTrack && !lkRoom.localParticipant.getTrackPublication(Track.Source.Camera)) {
-      lkRoom.localParticipant
-        .publishTrack(videoTrack, { source: Track.Source.Camera, simulcast: true })
-        .catch(() => {});
+      lkRoom.localParticipant.publishTrack(videoTrack, CAMERA_PUBLISH).catch(() => {});
     }
   }, [localStream, sfuConnected]);
 
@@ -309,7 +365,7 @@ export function useMediaRoom({
         if (existing) {
           existing.replaceTrack(track).catch(() => {});
         } else {
-          pc.addTrack(track, out);
+          tuneMeshVideoSender(pc.addTrack(track, out));
         }
       }
     }
@@ -378,7 +434,7 @@ export function useMediaRoom({
       const out = outgoingStreamRef.current;
       if (out) {
         for (const track of out.getTracks()) {
-          pc.addTrack(track, out);
+          tuneMeshVideoSender(pc.addTrack(track, out));
         }
       } else {
         pc.addTransceiver('video', { direction: 'recvonly' });
@@ -543,4 +599,23 @@ export function useMediaRoom({
     connectToPeers,
     closeAllPeers,
   };
+}
+
+/**
+ * Tell the LiveKit server what to send us for one publication. Turning a track
+ * off means the server stops forwarding it entirely (saves bandwidth, and the
+ * audio/video of people we may not perceive never reaches this browser).
+ */
+function applyPref(pub: RemoteTrackPublication, pref: RemotePref | undefined) {
+  const wanted: RemotePref = pref ?? { video: 'medium', audio: true };
+  if (pub.kind === Track.Kind.Video) {
+    if (wanted.video === 'off') {
+      pub.setEnabled(false);
+    } else {
+      pub.setEnabled(true);
+      pub.setVideoQuality(VIDEO_QUALITY[wanted.video]);
+    }
+  } else if (pub.kind === Track.Kind.Audio) {
+    pub.setEnabled(wanted.audio);
+  }
 }

@@ -8,7 +8,6 @@ export interface Translations extends LogDictionary {
   navWebcam: string;
   navStudio: string;
   navHost: string;
-  selfHostGuide: string;
   heroTitle: string;
   heroSubtitle: string;
   camMicCheck: string;
@@ -66,7 +65,6 @@ export interface Translations extends LogDictionary {
   camShort: string;
   controlsShort: string;
   roleShort: string;
-  selfHostShort: string;
   leave: string;
 
   // Phases & Night Banners
@@ -187,16 +185,6 @@ export interface Translations extends LogDictionary {
     }
   >;
 
-  // Host Guide Modal
-  hostGuideTitle: string;
-  hostGuideDesc: string;
-  hostOption1Title: string;
-  hostOption1Desc: string;
-  hostOption2Title: string;
-  hostOption2Desc: string;
-  copy: string;
-  copied: string;
-  done: string;
   modStudioTitle: string;
   roleChatTitle: string;
 }
@@ -206,11 +194,10 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     ...LOG_EN,
     navWebcam: 'Webcam Table',
     navStudio: 'Moderator Studio',
-    navHost: '7–16 Players & Phones',
-    selfHostGuide: 'Self-Host Guide',
+    navHost: 'Phones & Laptops',
     heroTitle: 'Live webcam Mafia with a dedicated Moderator console',
     heroSubtitle:
-      'Host a voice and video table for 7–16 friends on phones or laptops, rename players on the fly, deal secret roles, and direct every Night phase.',
+      'Host a voice and video table for your friends on phones or laptops, rename players on the fly, deal secret roles, and direct every Night phase.',
     camMicCheck: 'Camera & Mic Check',
     optionalForPlay: 'Optional for play',
     camTurnedOff: 'Camera turned off',
@@ -266,7 +253,6 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     camShort: 'Cam',
     controlsShort: 'Controls',
     roleShort: 'Role',
-    selfHostShort: 'Self-Host',
     leave: 'Leave',
 
     phaseLobby: 'Lobby',
@@ -409,18 +395,6 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       },
     },
 
-    hostGuideTitle: 'Self-Host on Demand (7–16 Players)',
-    hostGuideDesc:
-      'Spin up a private game server with LiveKit SFU video scaling and close it when game night ends.',
-    hostOption1Title: 'Option 1: Docker + LiveKit SFU + HTTPS link',
-    hostOption1Desc:
-      'Runs the app, built-in LiveKit SFU for 7–16 phones, and a temporary Cloudflare HTTPS URL.',
-    hostOption2Title: 'Option 2: LiveKit Cloud + Node.js',
-    hostOption2Desc:
-      'Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET in .env and run anywhere on port 3000.',
-    copy: 'Copy',
-    copied: 'Copied',
-    done: 'Done',
     modStudioTitle: 'Moderator Studio',
     roleChatTitle: 'Role & Chat',
   },
@@ -428,11 +402,10 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     ...LOG_UK,
     navWebcam: 'Відеостіл',
     navStudio: 'Пульт Ведучого',
-    navHost: '7–16 гравців і телефони',
-    selfHostGuide: 'Як запустити',
+    navHost: 'Телефони й комп’ютери',
     heroTitle: 'Онлайн-Мафія з вебкамерами та окремим пультом Ведучого',
     heroSubtitle:
-      'Збирайте друзів на 7–16 гравців з телефонів чи комп’ютерів, змінюйте нікнейми на льоту, роздавайте таємні ролі й керуйте кожною Ніччю.',
+      'Збирайте друзів за відеостолом з телефонів чи комп’ютерів, змінюйте нікнейми на льоту, роздавайте таємні ролі й керуйте кожною Ніччю.',
     camMicCheck: 'Перевірка камери та мікрофона',
     optionalForPlay: 'Необов’язково для входу',
     camTurnedOff: 'Камеру вимкнено',
@@ -488,7 +461,6 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     camShort: 'Кам.',
     controlsShort: 'Пульт',
     roleShort: 'Роль',
-    selfHostShort: 'Хостинг',
     leave: 'Вийти',
 
     phaseLobby: 'Лобі',
@@ -631,18 +603,6 @@ export const TRANSLATIONS: Record<Language, Translations> = {
       },
     },
 
-    hostGuideTitle: 'Власний запуск (7–16 гравців)',
-    hostGuideDesc:
-      'Запустіть приватний сервер із LiveKit SFU для стабільного відео на телефонах та вимкніть після гри.',
-    hostOption1Title: 'Варіант 1: Docker + LiveKit SFU + HTTPS-посилання',
-    hostOption1Desc:
-      'Запускає гру, медіасервер LiveKit для 7–16 телефонів і тимчасовий HTTPS-тунель Cloudflare.',
-    hostOption2Title: 'Варіант 2: LiveKit Cloud + Node.js',
-    hostOption2Desc:
-      'Додайте LIVEKIT_URL, LIVEKIT_API_KEY і LIVEKIT_API_SECRET у .env та запустіть на порту 3000.',
-    copy: 'Копіювати',
-    copied: 'Скопійовано',
-    done: 'Готово',
     modStudioTitle: 'Пульт Ведучого',
     roleChatTitle: 'Роль і чат',
   },

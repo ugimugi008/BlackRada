@@ -21,7 +21,6 @@ interface JoinScreenProps {
   onRequestMedia: () => void;
   onCreateRoom: (nickname: string, roomName: string) => void;
   onJoinRoom: (code: string, nickname: string) => void;
-  onOpenHostGuide: () => void;
 }
 
 export function JoinScreen({
@@ -42,7 +41,6 @@ export function JoinScreen({
   onRequestMedia,
   onCreateRoom,
   onJoinRoom,
-  onOpenHostGuide,
 }: JoinScreenProps) {
   const [mode, setMode] = useState<'host' | 'join'>(initialRoomCode ? 'join' : 'host');
   const [nickname, setNickname] = useState('');
@@ -119,15 +117,6 @@ export function JoinScreen({
                 EN
               </button>
             </div>
-            <button
-              type="button"
-              onClick={onOpenHostGuide}
-              className="flex h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 text-xs font-semibold text-white transition-colors hover:bg-white/10 whitespace-nowrap shrink-0"
-            >
-              <Server className="h-3.5 w-3.5 text-[#5865F2]" />
-              <span className="hidden sm:inline">{t.selfHostGuide}</span>
-              <span className="sm:hidden">{t.selfHostShort}</span>
-            </button>
           </div>
         </div>
       </header>
