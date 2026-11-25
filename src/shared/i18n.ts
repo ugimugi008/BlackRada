@@ -160,6 +160,11 @@ export interface Translations extends LogDictionary {
   talkSpeaking: string;
   talkYou: string;
   talkSetting: string;
+  volumeTitle: string;
+  muteForMe: string;
+  unmuteForMe: string;
+  volumeReset: string;
+  volumeHint: string;
   clearRoles: string;
   noSeatedYet: string;
   shareCodeHint: string;
@@ -370,6 +375,11 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     talkSpeaking: 'Speech',
     talkYou: 'Your speech. Everyone is listening.',
     talkSetting: 'Speech length',
+    volumeTitle: 'Volume',
+    muteForMe: 'Mute for me',
+    unmuteForMe: 'Unmute',
+    volumeReset: 'Reset',
+    volumeHint: 'Only changes what you hear.',
     clearRoles: 'Clear roles',
     noSeatedYet: 'No seated players yet',
     shareCodeHint: 'Share the room code {code} or invite link with your friends.',
@@ -594,6 +604,11 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     talkSpeaking: 'Промова',
     talkYou: 'Ваша промова. Вас слухають усі.',
     talkSetting: 'Тривалість промови',
+    volumeTitle: 'Гучність',
+    muteForMe: 'Вимкнути для мене',
+    unmuteForMe: 'Увімкнути',
+    volumeReset: 'Скинути',
+    volumeHint: 'Змінює гучність лише для вас.',
     clearRoles: 'Очистити ролі',
     noSeatedYet: 'Ще немає гравців за столом',
     shareCodeHint: 'Надішліть код {code} або посилання друзям.',

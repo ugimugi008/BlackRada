@@ -30,6 +30,7 @@ import { JoinScreen } from './components/JoinScreen';
 import { ModeratorPanel } from './components/ModeratorPanel';
 import { PlayerSidePanel } from './components/PlayerSidePanel';
 import { RemoteAudio } from './components/RemoteAudio';
+import { clampVolume, loadVolumes, saveVolumes, volumeKey, type VolumeMap } from './volumes';
 import { WebcamTile, type TileDisplay, type TileSize } from './components/WebcamTile';
 import { useMediaRoom, type LiveKitCredentials, type RemotePref } from './hooks/useMediaRoom';
 import { formatLog, type LogEntry } from './shared/gameLog';
@@ -104,6 +105,7 @@ export default function App() {
   const [moderatorListening, setModeratorListening] = useState(false);
   const [graveyardOpen, setGraveyardOpen] = useState(false); // Moderator: collapsed by default
   const [graveyardMuted, setGraveyardMuted] = useState(false); // eliminated player: focus on the game
+  const [volumes, setVolumes] = useState<VolumeMap>(() => loadVolumes()); // per-nickname, this device only
   const [isFullscreen, setIsFullscreen] = useState(false);
   const focusStageRef = useRef<HTMLDivElement | null>(null);
   const pendingPeerIdsRef = useRef<string[] | null>(null);
@@ -624,6 +626,20 @@ export default function App() {
     return perceive(me, p, mediaCtx).hear && !p.micMuted && !p.modForceMuted;
   };
 
+  const volumeOf = (playerId: string) => {
+    const p = room.players.find((x) => x.id === playerId);
+    return p ? volumes[volumeKey(p.nickname)] ?? 1 : 1;
+  };
+  const setPlayerVolume = (playerId: string, value: number) => {
+    const p = room.players.find((x) => x.id === playerId);
+    if (!p) return;
+    setVolumes((prev) => {
+      const next = { ...prev, [volumeKey(p.nickname)]: clampVolume(value) };
+      saveVolumes(next);
+      return next;
+    });
+  };
+
   const toggleFocus = (playerId: string) => {
     setFocusedId((cur) => (cur === playerId ? null : playerId));
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -643,6 +659,8 @@ export default function App() {
         isSpeaking={Boolean(speakingMap[player.id]) && hearsThem}
         display={display}
         talkState={talkStateOf(player.id)}
+        volume={isMe ? undefined : volumeOf(player.id)}
+        onVolumeChange={isMe ? undefined : setPlayerVolume}
         viewerIsModerator={room.isMeModerator}
         voteCount={player.isModerator ? 0 : voteTally.counts[player.id] || 0}
         isSelectedTarget={!player.isModerator && selectedTileTargetId === player.id}
@@ -1022,7 +1040,7 @@ export default function App() {
           )}
 
           {/* Shared audio layer: everyone you're allowed to hear, whatever is on screen */}
-          <RemoteAudio streams={remoteStreams} isAudible={isAudible} />
+          <RemoteAudio streams={remoteStreams} isAudible={isAudible} volumeOf={volumeOf} />
 
           {/* 2-Column Mobile / 3-4-Column Desktop Grid for up to 16+ players */}
           <div className={`flex-1 p-2.5 sm:p-5 ${focusedId ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-y-auto'}`}>

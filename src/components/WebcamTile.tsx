@@ -9,10 +9,13 @@ import {
   Pencil,
   Shield,
   Skull,
+  Volume1,
+  Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Translations } from '../shared/i18n';
 import { ROLE_META, formatSeatNumber, type PlayerRecord } from '../shared/mafiaEngine';
 
@@ -49,6 +52,9 @@ interface WebcamTileProps {
   onModeratorToggleCamHide?: (playerId: string, forceHidden: boolean) => void;
   onModeratorSetSeat?: (playerId: string, seatNumber: number) => void;
   onModeratorToggleTalk?: (playerId: string, on: boolean) => void;
+  /** This viewer's personal volume for the player (0–2); undefined for yourself. */
+  volume?: number;
+  onVolumeChange?: (playerId: string, volume: number) => void;
 }
 
 export function WebcamTile({
@@ -73,6 +79,8 @@ export function WebcamTile({
   onModeratorToggleCamHide,
   onModeratorSetSeat,
   onModeratorToggleTalk,
+  volume,
+  onVolumeChange,
 }: WebcamTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // Upright phone video is shown whole (dark bars at the sides, like Discord)
@@ -80,11 +88,44 @@ export function WebcamTile({
   const [isPortrait, setIsPortrait] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [editingSeat, setEditingSeat] = useState(false);
+  // Volume pop-up: floats above the tile (tiles are too short to hold it).
+  const [volumeAnchor, setVolumeAnchor] = useState<DOMRect | null>(null);
+  const volumeOpen = volumeAnchor !== null;
+  const setVolumeOpen = (open: boolean | ((v: boolean) => boolean)) => {
+    const next = typeof open === 'function' ? open(volumeOpen) : open;
+    setVolumeAnchor(next ? volumeButtonRef.current?.getBoundingClientRect() ?? null : null);
+  };
+  const volumeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const volumePanelRef = useRef<HTMLDivElement | null>(null);
   const [draftName, setDraftName] = useState(player.nickname);
 
   useEffect(() => {
     setDraftName(player.nickname);
   }, [player.nickname]);
+
+  const articleRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!volumeOpen) return;
+    const close = () => setVolumeAnchor(null);
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (volumePanelRef.current?.contains(target) || volumeButtonRef.current?.contains(target)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [volumeOpen]);
 
   const hasVideoTrack = Boolean(stream && stream.getVideoTracks().length > 0);
   const showVideo =
@@ -138,6 +179,7 @@ export function WebcamTile({
 
   return (
     <article
+      ref={articleRef}
       data-testid={`seat-tile-${player.seatNumber}`}
       data-player-id={player.id}
       data-display={display}
@@ -330,6 +372,61 @@ export function WebcamTile({
           </div>
         )}
 
+        {/* Personal volume (Discord-style), only for other people */}
+        {volumeAnchor && onVolumeChange && volume !== undefined && createPortal(
+          <div
+            ref={volumePanelRef}
+            role="dialog"
+            aria-label={`${t.volumeTitle}: ${player.nickname}`}
+            onDoubleClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              width: 232,
+              left: Math.max(8, Math.min(window.innerWidth - 240, volumeAnchor.right - 232)),
+              ...(volumeAnchor.top > 170
+                ? { bottom: window.innerHeight - volumeAnchor.top + 8 }
+                : { top: volumeAnchor.bottom + 8 }),
+            }}
+            className="z-50 rounded-lg border border-white/15 bg-[#0F1115] p-2.5 shadow-2xl"
+          >
+            <div className="mb-1.5 flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-white">{t.volumeTitle}</span>
+              <span className="font-mono font-bold text-white">{Math.round(volume * 100)}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={200}
+              step={5}
+              value={Math.round(volume * 100)}
+              onChange={(e) => onVolumeChange(player.id, Number(e.target.value) / 100)}
+              aria-label={`${t.volumeTitle}: ${player.nickname}`}
+              className="h-6 w-full cursor-pointer accent-[#5865F2]"
+            />
+            <div className="mt-1.5 flex items-center justify-between gap-1.5">
+              <button
+                type="button"
+                onClick={() => onVolumeChange(player.id, volume === 0 ? 1 : 0)}
+                className={`h-7 whitespace-nowrap rounded-md px-2 text-[11px] font-semibold ${
+                  volume === 0 ? 'bg-rose-600 text-white' : 'border border-white/15 text-[#D1D5DB] hover:bg-white/10'
+                }`}
+              >
+                {volume === 0 ? t.unmuteForMe : t.muteForMe}
+              </button>
+              <button
+                type="button"
+                onClick={() => onVolumeChange(player.id, 1)}
+                disabled={volume === 1}
+                className="h-7 whitespace-nowrap rounded-md border border-white/15 px-2 text-[11px] font-semibold text-[#D1D5DB] hover:bg-white/10 disabled:opacity-40"
+              >
+                {t.volumeReset}
+              </button>
+            </div>
+            <p className="mt-1 text-[10px] text-[#9CA3AF]">{t.volumeHint}</p>
+          </div>,
+          document.body
+        )}
+
         {/* Bottom scrim: nickname + media icons + target button */}
         <div
           className={`absolute inset-x-0 bottom-0 flex items-center justify-between gap-1.5 bg-gradient-to-t from-black/85 via-black/45 to-transparent ${
@@ -388,6 +485,32 @@ export function WebcamTile({
                     }`}
                   >
                     {actionButtonLabel}
+                  </button>
+                )}
+                {onVolumeChange && volume !== undefined && !isSmall && display !== 'graveyard' && (
+                  <button
+                    ref={volumeButtonRef}
+                    type="button"
+                    onClick={() => setVolumeOpen((v) => !v)}
+                    aria-expanded={volumeOpen}
+                    aria-label={`${t.volumeTitle}: ${player.nickname} (${Math.round(volume * 100)}%)`}
+                    title={`${t.volumeTitle}: ${Math.round(volume * 100)}%`}
+                    className={`flex h-6 items-center gap-0.5 rounded px-1 text-[10px] font-semibold ${
+                      volume === 0
+                        ? 'bg-rose-600/90 text-white'
+                        : volume !== 1
+                        ? 'bg-[#5865F2]/90 text-white'
+                        : 'text-[#D1D5DB] hover:bg-white/15'
+                    }`}
+                  >
+                    {volume === 0 ? (
+                      <VolumeX className="h-3.5 w-3.5" />
+                    ) : volume < 1 ? (
+                      <Volume1 className="h-3.5 w-3.5" />
+                    ) : (
+                      <Volume2 className="h-3.5 w-3.5" />
+                    )}
+                    {volume !== 1 && <span>{Math.round(volume * 100)}%</span>}
                   </button>
                 )}
                 {effectiveMuted && display !== 'graveyard' && (
