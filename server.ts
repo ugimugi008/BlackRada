@@ -23,8 +23,10 @@ import {
   type NightStep,
   type PlayerRecord,
   type RoleConfig,
+  shuffleArray,
   type WinnerSide,
 } from './src/shared/mafiaEngine.ts';
+import { LOG_EN, formatLog, type LogEntry, type LogParams } from './src/shared/gameLog.ts';
 
 dotenv.config();
 
@@ -79,7 +81,7 @@ interface RoomInternal {
   players: PlayerRecord[];
   votes: Record<string, string | 'SKIP'>;
   nightActions: NightActions;
-  lastMorningSummary: string | null;
+  lastMorningSummary: LogEntry | null;
   winner: WinnerSide;
   timerSecondsLeft: number;
   timerRunning: boolean;
@@ -111,14 +113,23 @@ function createSecretToken(): string {
   return crypto.randomBytes(24).toString('hex');
 }
 
-function addSystemMessage(room: RoomInternal, text: string) {
+/** Adds a "Table" log line. Clients render `log` in their own language; `text` is the English fallback. */
+/** Ack helper: a translatable entry plus its English text. */
+function keyed(key: LogEntry['key'], params?: LogParams) {
+  const entry: LogEntry = params ? { key, params } : { key };
+  return { entry, text: formatLog(LOG_EN, entry) };
+}
+
+function addSystemMessage(room: RoomInternal, key: LogEntry['key'], params?: LogParams) {
+  const log: LogEntry = params ? { key, params } : { key };
   room.messages.push({
     id: createId(),
     senderId: 'system',
     senderName: 'Table',
-    text,
+    text: formatLog(LOG_EN, log),
     timestamp: Date.now(),
     channel: 'system',
+    log,
   });
   if (room.messages.length > 150) {
     room.messages = room.messages.slice(-150);
@@ -261,7 +272,7 @@ async function startServer() {
         room.timerSecondsLeft -= 1;
         if (room.timerSecondsLeft === 0) {
           room.timerRunning = false;
-          addSystemMessage(room, 'Discussion timer finished.');
+          addSystemMessage(room, 'timerDone');
         }
         broadcastRoomState(io, room);
       } else {
@@ -332,7 +343,7 @@ async function startServer() {
           createdAt: Date.now(),
         };
 
-        addSystemMessage(room, `${nickname} opened the room as Moderator.`);
+        addSystemMessage(room, 'roomOpened', { name: nickname });
         rooms.set(code, room);
         socketIndex.set(socket.id, { roomCode: code, playerId });
         socket.join(code);
@@ -371,7 +382,7 @@ async function startServer() {
           .slice(0, 8);
         const room = rooms.get(code);
         if (!room) {
-          ack?.({ ok: false, error: 'Room not found. Check the room code and try again.' });
+          { const k = keyed('errRoomNotFound'); ack?.({ ok: false, error: k.text, errorEntry: k.entry }); }
           return;
         }
 
@@ -408,7 +419,7 @@ async function startServer() {
 
         const seatedCount = room.players.filter((p) => !p.isModerator).length;
         if (seatedCount >= 20) {
-          ack?.({ ok: false, error: 'This room is at the 20-player limit.' });
+          { const k = keyed('errRoomFull'); ack?.({ ok: false, error: k.text, errorEntry: k.entry }); }
           return;
         }
 
@@ -443,7 +454,7 @@ async function startServer() {
         socketIndex.set(socket.id, { roomCode: code, playerId });
         socket.join(code);
 
-        addSystemMessage(room, `${nickname} took Seat ${formatSeatNumber(newPlayer.seatNumber)}.`);
+        addSystemMessage(room, 'tookSeat', { name: nickname, seat: formatSeatNumber(newPlayer.seatNumber) });
         const peerIds = getConnectedPeerIds(room, playerId);
         socket.to(code).emit('rtc:peerJoined', { playerId });
         broadcastRoomState(io, room);
@@ -474,7 +485,7 @@ async function startServer() {
       broadcastRoomState(io, room);
     });
 
-    socket.on('chat:send', (payload: { text?: string; channel?: 'public' | 'mafia' }) => {
+    socket.on('chat:send', (payload: { text?: string; channel?: 'public' | 'mafia' | 'dead' }) => {
       const ctx = socketIndex.get(socket.id);
       if (!ctx) return;
       const room = rooms.get(ctx.roomCode);
@@ -486,8 +497,17 @@ async function startServer() {
       if (!raw) return;
       const text = raw.slice(0, 300);
 
-      let channel: 'public' | 'mafia' = payload?.channel === 'mafia' ? 'mafia' : 'public';
-      if (channel === 'mafia') {
+      const requested = payload?.channel;
+      let channel: 'public' | 'mafia' | 'dead' =
+        requested === 'mafia' ? 'mafia' : requested === 'dead' ? 'dead' : 'public';
+      const gameRunning = room.phase === 'NIGHT' || room.phase === 'DAY' || room.phase === 'VOTING';
+      const inGraveyard = !player.isModerator && !player.isAlive && gameRunning;
+      if (inGraveyard) {
+        // The dead can only talk among themselves while the game runs.
+        channel = 'dead';
+      } else if (channel === 'dead') {
+        if (!player.isModerator) channel = 'public';
+      } else if (channel === 'mafia') {
         const allowed =
           player.isModerator || player.role === 'mafia' || player.role === 'don';
         if (!allowed) channel = 'public';
@@ -552,7 +572,7 @@ async function startServer() {
         const nextName = sanitizeNickname(String(payload.nickname || ''), prevName);
         if (nextName === prevName) return;
         target.nickname = nextName;
-        addSystemMessage(room, `Moderator renamed ${prevName} to ${nextName}.`);
+        addSystemMessage(room, 'renamed', { prev: prevName, next: nextName });
       })
     );
 
@@ -570,6 +590,41 @@ async function startServer() {
         [seated[idx], seated[swapIdx]] = [seated[swapIdx], seated[idx]];
         room.players = modPlayer ? [modPlayer, ...seated] : seated;
         renumberSeats(room);
+      })
+    );
+
+    socket.on(
+      'mod:setSeat',
+      withModerator((room, _mod, payload) => {
+        const targetId = String(payload.targetPlayerId || '');
+        const seated = room.players.filter((p) => !p.isModerator);
+        const modPlayer = room.players.find((p) => p.isModerator);
+        const idx = seated.findIndex((p) => p.id === targetId);
+        if (idx === -1) return;
+        const wanted = Math.round(Number(payload.seatNumber));
+        if (!Number.isFinite(wanted)) return;
+        const newIdx = Math.max(0, Math.min(seated.length - 1, wanted - 1));
+        if (newIdx === idx) return;
+        const [target] = seated.splice(idx, 1);
+        seated.splice(newIdx, 0, target);
+        room.players = modPlayer ? [modPlayer, ...seated] : seated;
+        renumberSeats(room);
+        addSystemMessage(room, 'seatChanged', {
+          name: target.nickname,
+          seat: formatSeatNumber(newIdx + 1),
+        });
+      })
+    );
+
+    socket.on(
+      'mod:shuffleSeats',
+      withModerator((room) => {
+        const seated = room.players.filter((p) => !p.isModerator);
+        if (seated.length < 2) return;
+        const modPlayer = room.players.find((p) => p.isModerator);
+        room.players = modPlayer ? [modPlayer, ...shuffleArray(seated)] : shuffleArray(seated);
+        renumberSeats(room);
+        addSystemMessage(room, 'seatsShuffled');
       })
     );
 
@@ -594,7 +649,7 @@ async function startServer() {
         delete room.votes[targetId];
         renumberSeats(room);
         io.to(room.code).emit('rtc:peerLeft', { playerId: targetId });
-        addSystemMessage(room, `${target.nickname} was removed from the table.`);
+        addSystemMessage(room, 'kicked', { name: target.nickname });
       })
     );
 
@@ -617,12 +672,12 @@ async function startServer() {
       withModerator((room, _mod, payload) => {
         if (payload.mode === 'clear') {
           room.players = room.players.map((p) => ({ ...p, role: null, isAlive: true }));
-          addSystemMessage(room, 'Moderator cleared all dealt roles.');
+          addSystemMessage(room, 'rolesCleared');
           return;
         }
         room.players = assignRolesToPlayers(room.players, room.roleConfig);
         room.winner = null;
-        addSystemMessage(room, 'Moderator dealt secret roles to all seated players.');
+        addSystemMessage(room, 'rolesDealt');
       })
     );
 
@@ -646,17 +701,17 @@ async function startServer() {
         const target = room.players.find((p) => p.id === targetId && !p.isModerator);
         if (!target) return;
         target.isAlive = !target.isAlive;
-        addSystemMessage(
-          room,
-          `Moderator marked Seat ${formatSeatNumber(target.seatNumber)} (${target.nickname}) as ${target.isAlive ? 'alive' : 'eliminated'}.`
-        );
+        addSystemMessage(room, target.isAlive ? 'markedAlive' : 'markedDead', {
+          seat: formatSeatNumber(target.seatNumber),
+          name: target.nickname,
+        });
         if (room.phase !== 'LOBBY') {
           const w = checkWinCondition(room.players);
           if (w) {
             room.winner = w;
             room.phase = 'ENDED';
             room.timerRunning = false;
-            addSystemMessage(room, `${w === 'TOWN' ? 'Town' : 'Mafia'} wins the game!`);
+            addSystemMessage(room, 'teamWins', { team: w });
           }
         }
       })
@@ -697,7 +752,7 @@ async function startServer() {
           sheriffCheckId: null,
           doctorSaveId: null,
         };
-        addSystemMessage(room, `Night ${room.nightNumber} begins. The town goes to sleep.`);
+        addSystemMessage(room, 'nightBegins', { n: room.nightNumber });
       })
     );
 
@@ -743,15 +798,19 @@ async function startServer() {
           if (victim) victim.isAlive = false;
         }
         room.dayNumber += 1;
-        room.lastMorningSummary = outcome.summary;
+        const morning: LogEntry = {
+          key: outcome.summaryLog.key,
+          params: { ...(outcome.summaryLog.params ?? {}), day: room.dayNumber },
+        };
+        room.lastMorningSummary = morning;
         room.votes = {};
-        addSystemMessage(room, `Day ${room.dayNumber}: ${outcome.summary}`);
+        addSystemMessage(room, morning.key, morning.params);
 
         const winner = checkWinCondition(room.players);
         if (winner) {
           room.winner = winner;
           room.phase = 'ENDED';
-          addSystemMessage(room, `${winner === 'TOWN' ? 'Town' : 'Mafia'} wins the game!`);
+          addSystemMessage(room, 'teamWins', { team: winner });
         } else {
           room.phase = 'DAY';
           room.timerSecondsLeft = 90;
@@ -766,7 +825,7 @@ async function startServer() {
         room.phase = 'DAY';
         if (room.dayNumber === 0) room.dayNumber = 1;
         room.votes = {};
-        addSystemMessage(room, `Moderator opened Day ${room.dayNumber} discussion.`);
+        addSystemMessage(room, 'dayOpened', { n: room.dayNumber });
       })
     );
 
@@ -776,7 +835,7 @@ async function startServer() {
         room.phase = 'VOTING';
         room.votes = {};
         room.timerRunning = false;
-        addSystemMessage(room, 'Voting is open. Alive players may cast a vote.');
+        addSystemMessage(room, 'votingOpen');
       })
     );
 
@@ -796,14 +855,16 @@ async function startServer() {
           const victim = room.players.find((p) => p.id === targetId && !p.isModerator);
           if (victim) {
             victim.isAlive = false;
-            const summary = `Town voted out Seat ${formatSeatNumber(victim.seatNumber)} (${victim.nickname}).`;
+            const summary: LogEntry = {
+              key: 'votedOut',
+              params: { seat: formatSeatNumber(victim.seatNumber), name: victim.nickname },
+            };
             room.lastMorningSummary = summary;
-            addSystemMessage(room, summary);
+            addSystemMessage(room, summary.key, summary.params);
           }
         } else {
-          const summary = 'No player was eliminated during voting.';
-          room.lastMorningSummary = summary;
-          addSystemMessage(room, summary);
+          room.lastMorningSummary = { key: 'noElimination' };
+          addSystemMessage(room, 'noElimination');
         }
 
         room.votes = {};
@@ -811,7 +872,7 @@ async function startServer() {
         if (winner) {
           room.winner = winner;
           room.phase = 'ENDED';
-          addSystemMessage(room, `${winner === 'TOWN' ? 'Town' : 'Mafia'} wins the game!`);
+          addSystemMessage(room, 'teamWins', { team: winner });
         } else {
           room.phase = 'DAY';
         }
@@ -825,7 +886,7 @@ async function startServer() {
         room.winner = winner;
         room.phase = 'ENDED';
         room.timerRunning = false;
-        addSystemMessage(room, 'Moderator ended the round and revealed all roles.');
+        addSystemMessage(room, 'roundEnded');
       })
     );
 
@@ -833,7 +894,7 @@ async function startServer() {
       'mod:resetLobby',
       withModerator((room) => {
         resetTableToLobby(room);
-        addSystemMessage(room, 'Moderator reset the table to Lobby for a new round.');
+        addSystemMessage(room, 'lobbyReset');
       })
     );
 
@@ -851,10 +912,7 @@ async function startServer() {
         const token = handOverModerator(room, targetId);
         if (!token) return;
         sendModeratorToken(room, token);
-        addSystemMessage(
-          room,
-          `${mod.nickname} passed the Moderator role to ${targetName}. The table is back in Lobby.`
-        );
+        addSystemMessage(room, 'modPassed', { from: mod.nickname, to: targetName ?? '' });
       })
     );
 
@@ -865,12 +923,12 @@ async function startServer() {
       if (!room) return;
       const claimant = room.players.find((p) => p.id === ctx.playerId);
       if (!claimant || claimant.isModerator) {
-        ack?.({ ok: false, error: 'You are already the Moderator.' });
+        { const k = keyed('errAlreadyModerator'); ack?.({ ok: false, error: k.text, errorEntry: k.entry }); }
         return;
       }
       const currentMod = room.players.find((p) => p.id === room.moderatorId);
       if (currentMod?.isConnected) {
-        ack?.({ ok: false, error: 'The Moderator is back online.' });
+        { const k = keyed('errModeratorBack'); ack?.({ ok: false, error: k.text, errorEntry: k.entry }); }
         return;
       }
       const offlineFor = Date.now() - (room.moderatorOfflineSince ?? 0);
@@ -881,13 +939,10 @@ async function startServer() {
       }
       const token = handOverModerator(room, claimant.id);
       if (!token) {
-        ack?.({ ok: false, error: 'Could not take over.' });
+        { const k = keyed('errTakeoverFailed'); ack?.({ ok: false, error: k.text, errorEntry: k.entry }); }
         return;
       }
-      addSystemMessage(
-        room,
-        `${claimant.nickname} took over as Moderator because ${currentMod?.nickname ?? 'the Moderator'} was offline. The table is back in Lobby.`
-      );
+      addSystemMessage(room, 'modTakeover', { to: claimant.nickname, from: currentMod?.nickname ?? '—' });
       broadcastRoomState(io, room);
       ack?.({ ok: true, moderatorToken: token });
     });
@@ -950,7 +1005,7 @@ async function startServer() {
         if (actionType === 'mafia' && room.nightStep === 'MAFIA' && (actor.role === 'mafia' || actor.role === 'don')) {
           room.nightActions.mafiaTargetId = target.id;
           broadcastRoomState(io, room);
-          ack?.({ ok: true, message: `Marked ${target.nickname} for tonight.` });
+          { const k = keyed('fbMarked', { name: target.nickname }); ack?.({ ok: true, message: k.text, messageEntry: k.entry }); }
           return;
         }
         if (actionType === 'don' && room.nightStep === 'DON' && actor.role === 'don') {
@@ -960,7 +1015,10 @@ async function startServer() {
           ack?.({
             ok: true,
             result: isSheriff ? 'SHERIFF' : 'NOT_SHERIFF',
-            message: `${target.nickname} is ${isSheriff ? 'the Sheriff!' : 'not the Sheriff.'}`,
+            ...(() => {
+              const k = keyed(isSheriff ? 'fbIsSheriff' : 'fbNotSheriff', { name: target.nickname });
+              return { message: k.text, messageEntry: k.entry };
+            })(),
           });
           return;
         }
@@ -971,18 +1029,21 @@ async function startServer() {
           ack?.({
             ok: true,
             result: isMafia ? 'MAFIA' : 'TOWN',
-            message: `${target.nickname} belongs to ${isMafia ? 'the MAFIA' : 'the TOWN'}.`,
+            ...(() => {
+              const k = keyed(isMafia ? 'fbIsMafia' : 'fbIsTown', { name: target.nickname });
+              return { message: k.text, messageEntry: k.entry };
+            })(),
           });
           return;
         }
         if (actionType === 'doctor' && room.nightStep === 'DOCTOR' && actor.role === 'doctor') {
           room.nightActions.doctorSaveId = target.id;
           broadcastRoomState(io, room);
-          ack?.({ ok: true, message: `Protecting ${target.nickname} tonight.` });
+          { const k = keyed('fbProtecting', { name: target.nickname }); ack?.({ ok: true, message: k.text, messageEntry: k.entry }); }
           return;
         }
 
-        ack?.({ ok: false, error: 'Action not allowed during this step.' });
+        { const k = keyed('fbNotAllowed'); ack?.({ ok: false, error: k.text, errorEntry: k.entry }); }
       }
     );
 
@@ -1002,7 +1063,7 @@ async function startServer() {
         room.playerTokens.delete(player.id);
         renumberSeats(room);
         io.to(room.code).emit('rtc:peerLeft', { playerId: player.id });
-        addSystemMessage(room, `${player.nickname} left the room.`);
+        addSystemMessage(room, 'left', { name: player.nickname });
         broadcastRoomState(io, room);
       } else {
         player.isConnected = false;

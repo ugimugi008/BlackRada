@@ -1,3 +1,5 @@
+import type { LogEntry } from './gameLog';
+
 export type MafiaRole = 'mafia' | 'don' | 'sheriff' | 'doctor' | 'villager';
 
 export type GamePhase = 'LOBBY' | 'NIGHT' | 'DAY' | 'VOTING' | 'ENDED';
@@ -40,7 +42,10 @@ export interface ChatMessage {
   senderName: string;
   text: string;
   timestamp: number;
-  channel: 'public' | 'mafia' | 'system';
+  /** 'dead' = the Graveyard chat: only eliminated players and the Moderator see it. */
+  channel: 'public' | 'mafia' | 'system' | 'dead';
+  /** System messages carry a language-neutral entry; `text` is the English fallback. */
+  log?: LogEntry;
 }
 
 export interface RoomPublicState {
@@ -54,7 +59,7 @@ export interface RoomPublicState {
   players: Array<Omit<PlayerRecord, 'role'> & { role: MafiaRole | null }>;
   votes: Record<string, string | 'SKIP'>; // voterId -> targetPlayerId | 'SKIP'
   nightActions: NightActions | null; // Only sent to Moderator (or filtered)
-  lastMorningSummary: string | null;
+  lastMorningSummary: LogEntry | null;
   winner: WinnerSide;
   timerSecondsLeft: number;
   timerRunning: boolean;
@@ -225,6 +230,8 @@ export function resolveNightOutcome(
   donFoundSheriff: boolean;
   sheriffFoundMafia: boolean;
   summary: string;
+  /** Language-neutral version of `summary` (the server adds the day number). */
+  summaryLog: LogEntry;
 } {
   const target = players.find((p) => p.id === actions.mafiaTargetId && !p.isModerator && p.isAlive) ?? null;
   const saved = Boolean(target && actions.doctorSaveId && target.id === actions.doctorSaveId);
@@ -242,6 +249,7 @@ export function resolveNightOutcome(
       donFoundSheriff,
       sheriffFoundMafia,
       summary: 'Night ended quietly. No one was targeted.',
+      summaryLog: { key: 'nightQuiet' },
     };
   }
 
@@ -252,6 +260,7 @@ export function resolveNightOutcome(
       donFoundSheriff,
       sheriffFoundMafia,
       summary: 'The town wakes up intact — the Doctor saved the targeted player.',
+      summaryLog: { key: 'nightSaved' },
     };
   }
 
@@ -261,6 +270,10 @@ export function resolveNightOutcome(
     donFoundSheriff,
     sheriffFoundMafia,
     summary: `Seat ${formatSeatNumber(target.seatNumber)} (${target.nickname}) was eliminated during the night.`,
+    summaryLog: {
+      key: 'nightKilled',
+      params: { seat: formatSeatNumber(target.seatNumber), name: target.nickname },
+    },
   };
 }
 
@@ -339,7 +352,7 @@ export function redactRoomForViewer(
     players: PlayerRecord[];
     votes: Record<string, string | 'SKIP'>;
     nightActions: NightActions;
-    lastMorningSummary: string | null;
+    lastMorningSummary: LogEntry | null;
     winner: WinnerSide;
     timerSecondsLeft: number;
     timerRunning: boolean;
@@ -349,7 +362,10 @@ export function redactRoomForViewer(
 ): RoomPublicState {
   const viewer = room.players.find((p) => p.id === viewerId);
   const isMeModerator = Boolean(viewer?.isModerator);
-  const revealAll = isMeModerator || room.phase === 'ENDED';
+  const gameRunning = room.phase === 'NIGHT' || room.phase === 'DAY' || room.phase === 'VOTING';
+  // Eliminated players spectate from the Graveyard and see every role.
+  const viewerInGraveyard = Boolean(viewer && !viewer.isModerator && !viewer.isAlive && gameRunning);
+  const revealAll = isMeModerator || room.phase === 'ENDED' || viewerInGraveyard;
 
   const playersForViewer = room.players.map((p) => {
     const isSelf = p.id === viewerId;
@@ -365,8 +381,20 @@ export function redactRoomForViewer(
   });
 
   const visibleMessages = room.messages.filter((msg) => {
-    if (msg.channel !== 'mafia') return true;
-    return isMeModerator || viewer?.role === 'mafia' || viewer?.role === 'don' || room.phase === 'ENDED';
+    if (msg.channel === 'mafia') {
+      return (
+        isMeModerator ||
+        viewer?.role === 'mafia' ||
+        viewer?.role === 'don' ||
+        viewerInGraveyard ||
+        room.phase === 'ENDED'
+      );
+    }
+    if (msg.channel === 'dead') {
+      // Hidden from the living while a game runs; everyone may read it afterwards.
+      return isMeModerator || viewerInGraveyard || !gameRunning;
+    }
+    return true;
   });
 
   return {

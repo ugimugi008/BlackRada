@@ -1,6 +1,7 @@
 import { Eye, EyeOff, Moon, ShieldAlert, Vote } from 'lucide-react';
 import { useState } from 'react';
 import type { Translations } from '../shared/i18n';
+import { ChatBox, type ChatChannel } from './ChatBox';
 import {
   ROLE_META,
   formatSeatNumber,
@@ -18,7 +19,7 @@ interface PlayerSidePanelProps {
     actionType: 'mafia' | 'don' | 'sheriff' | 'doctor',
     targetId: string
   ) => void;
-  onSendChat: (text: string, channel: 'public' | 'mafia') => void;
+  onSendChat: (text: string, channel: ChatChannel) => void;
 }
 
 export function PlayerSidePanel({
@@ -30,8 +31,6 @@ export function PlayerSidePanel({
   onSendChat,
 }: PlayerSidePanelProps) {
   const [roleVisible, setRoleVisible] = useState(true);
-  const [chatText, setChatText] = useState('');
-  const [chatChannel, setChatChannel] = useState<'public' | 'mafia'>('public');
 
   const me = room.players.find((p) => p.id === room.myPlayerId);
   const seatedPlayers = room.players.filter((p) => !p.isModerator);
@@ -60,12 +59,6 @@ export function PlayerSidePanel({
       ? 'doctor'
       : null;
 
-  const handleSendChat = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatText.trim()) return;
-    onSendChat(chatText.trim(), chatChannel);
-    setChatText('');
-  };
 
   return (
     <aside
@@ -215,80 +208,7 @@ export function PlayerSidePanel({
       )}
 
       {/* Chat & Table Log */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="border-b border-white/10 px-4 py-2.5">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-[#9CA3AF]">
-            {t.tableChatLog}
-          </h3>
-        </div>
-        <div className="flex-1 space-y-2.5 overflow-y-auto p-3.5">
-          {room.messages.map((msg) => (
-            <div key={msg.id} className="text-xs leading-relaxed">
-              {msg.channel === 'system' ? (
-                <p className="text-[#9CA3AF]">{msg.text}</p>
-              ) : (
-                <p>
-                  <span
-                    className={`font-semibold ${
-                      msg.channel === 'mafia' ? 'text-rose-400' : 'text-[#C7D2FE]'
-                    }`}
-                  >
-                    {msg.channel === 'mafia' ? `[${t.roles.mafia.label}] ` : ''}
-                    {msg.senderName}:
-                  </span>{' '}
-                  <span className="text-[#E5E7EB]">{msg.text}</span>
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <form onSubmit={handleSendChat} className="border-t border-white/10 p-3 space-y-2">
-          {isMafiaTeam && (
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={() => setChatChannel('public')}
-                className={`rounded px-2.5 py-1 text-xs font-medium ${
-                  chatChannel === 'public'
-                    ? 'bg-[#5865F2] text-white'
-                    : 'bg-[#0F1115] text-[#9CA3AF]'
-                }`}
-              >
-                {t.tableChat}
-              </button>
-              <button
-                type="button"
-                onClick={() => setChatChannel('mafia')}
-                className={`rounded px-2.5 py-1 text-xs font-medium ${
-                  chatChannel === 'mafia'
-                    ? 'bg-rose-600 text-white'
-                    : 'bg-[#0F1115] text-[#9CA3AF]'
-                }`}
-              >
-                {t.mafiaWhisper}
-              </button>
-            </div>
-          )}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={chatText}
-              maxLength={300}
-              onChange={(e) => setChatText(e.target.value)}
-              placeholder={t.messagePlaceholder}
-              aria-label={t.send}
-              className="h-9 min-w-0 flex-1 rounded-lg border border-white/15 bg-[#0F1115] px-3 text-xs text-white placeholder-[#6B7280] focus:border-[#5865F2] focus:outline-none"
-            />
-            <button
-              type="submit"
-              className="h-9 rounded-lg bg-[#5865F2] px-3 text-xs font-semibold text-white hover:bg-[#4752C4]"
-            >
-              {t.send}
-            </button>
-          </div>
-        </form>
-      </div>
+      <ChatBox t={t} room={room} onSendChat={onSendChat} title={t.tableChatLog} />
     </aside>
   );
 }

@@ -1,8 +1,9 @@
 import type { GamePhase, MafiaRole, NightStep } from './mafiaEngine';
+import { LOG_EN, LOG_UK, type LogDictionary } from './gameLog';
 
 export type Language = 'en' | 'uk';
 
-export interface Translations {
+export interface Translations extends LogDictionary {
   // Header & Entry
   navWebcam: string;
   navStudio: string;
@@ -124,6 +125,22 @@ export interface Translations {
   moderatorOfflineHint: string;
   takeOverModerator: string;
   takeoverWait: string;
+  focusCamera: string;
+  exitFocus: string;
+  fullscreen: string;
+  exitFullscreen: string;
+  shuffleSeats: string;
+  changeSeat: string;
+  seatWord: string;
+  graveyardTitle: string;
+  graveyardBannerTitle: string;
+  graveyardBannerText: string;
+  graveyardEmpty: string;
+  listenGraveyard: string;
+  stopListenGraveyard: string;
+  graveyardListenHint: string;
+  graveyardPlaceholder: string;
+  graveyardChatNote: string;
   clearRoles: string;
   noSeatedYet: string;
   shareCodeHint: string;
@@ -181,6 +198,7 @@ export interface Translations {
 
 export const TRANSLATIONS: Record<Language, Translations> = {
   en: {
+    ...LOG_EN,
     navWebcam: 'Webcam Table',
     navStudio: 'Moderator Studio',
     navHost: '7–16 Players & Phones',
@@ -307,6 +325,23 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     moderatorOfflineHint: 'If {name} does not come back, anyone can take over. The table goes back to Lobby.',
     takeOverModerator: 'Take over as Moderator',
     takeoverWait: 'The Moderator just dropped. Try again in {s}s.',
+    focusCamera: 'Enlarge',
+    exitFocus: 'Back to grid',
+    fullscreen: 'Full screen',
+    exitFullscreen: 'Exit full screen',
+    shuffleSeats: 'Shuffle seats',
+    changeSeat: 'Change seat number',
+    seatWord: 'Seat',
+    graveyardTitle: 'Graveyard',
+    graveyardBannerTitle: "You're in the Graveyard",
+    graveyardBannerText:
+      "Living players can't see or hear you. Talk freely with the other eliminated players, watch the game and see every role.",
+    graveyardEmpty: 'No one here yet.',
+    listenGraveyard: 'Listen to Graveyard',
+    stopListenGraveyard: 'Stop listening',
+    graveyardListenHint: 'Only you hear them. Living players never do.',
+    graveyardPlaceholder: 'Message the Graveyard…',
+    graveyardChatNote: 'Only eliminated players and the Moderator see this.',
     clearRoles: 'Clear roles',
     noSeatedYet: 'No seated players yet',
     shareCodeHint: 'Share the room code {code} or invite link with your friends.',
@@ -380,6 +415,7 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     roleChatTitle: 'Role & Chat',
   },
   uk: {
+    ...LOG_UK,
     navWebcam: 'Відеостіл',
     navStudio: 'Пульт Ведучого',
     navHost: '7–16 гравців і телефони',
@@ -506,6 +542,23 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     moderatorOfflineHint: 'Якщо {name} не повернеться, будь-хто може його замінити. Стіл повернеться до Лобі.',
     takeOverModerator: 'Стати Ведучим',
     takeoverWait: 'Ведучий щойно вийшов. Спробуйте за {s} с.',
+    focusCamera: 'Збільшити',
+    exitFocus: 'Назад до сітки',
+    fullscreen: 'На весь екран',
+    exitFullscreen: 'Вийти з повного екрана',
+    shuffleSeats: 'Перемішати місця',
+    changeSeat: 'Змінити номер місця',
+    seatWord: 'Місце',
+    graveyardTitle: 'Цвинтар',
+    graveyardBannerTitle: 'Ви на цвинтарі',
+    graveyardBannerText:
+      'Живі гравці вас не бачать і не чують. Спілкуйтеся з іншими вибулими, стежте за грою — вам видно всі ролі.',
+    graveyardEmpty: 'Тут поки нікого.',
+    listenGraveyard: 'Слухати цвинтар',
+    stopListenGraveyard: 'Не слухати',
+    graveyardListenHint: 'Їх чуєте лише ви. Живі гравці — ніколи.',
+    graveyardPlaceholder: 'Повідомлення на цвинтар…',
+    graveyardChatNote: 'Це бачать лише вибулі гравці та Ведучий.',
     clearRoles: 'Очистити ролі',
     noSeatedYet: 'Ще немає гравців за столом',
     shareCodeHint: 'Надішліть код {code} або посилання друзям.',

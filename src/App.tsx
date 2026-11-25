@@ -5,14 +5,19 @@ import {
   Check,
   Copy,
   Crown,
+  Ghost,
   LogOut,
+  Maximize,
   Mic,
   MicOff,
+  Minimize,
   Moon,
   PanelRight,
   Server,
   Sun,
   Trophy,
+  Volume2,
+  VolumeX,
   Vote,
   X,
 } from 'lucide-react';
@@ -22,9 +27,12 @@ import { HostGuideModal } from './components/HostGuideModal';
 import { JoinScreen } from './components/JoinScreen';
 import { ModeratorPanel } from './components/ModeratorPanel';
 import { PlayerSidePanel } from './components/PlayerSidePanel';
-import { WebcamTile } from './components/WebcamTile';
+import { RemoteAudio } from './components/RemoteAudio';
+import { WebcamTile, type TileDisplay, type TileSize } from './components/WebcamTile';
 import { useMediaRoom, type LiveKitCredentials } from './hooks/useMediaRoom';
+import { formatLog, type LogEntry } from './shared/gameLog';
 import { TRANSLATIONS, formatPhaseLabel, type Language } from './shared/i18n';
+import { isAwakeForMedia, isGraveyardActive, isInGraveyard, perceive } from './shared/mediaPolicy';
 import {
   isPlayerAwakeDuringNight,
   tallyVotes,
@@ -71,7 +79,14 @@ export default function App() {
   const [copiedInvite, setCopiedInvite] = useState(false);
   const [hostGuideOpen, setHostGuideOpen] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
-  const [nightFeedback, setNightFeedback] = useState<string | null>(null);
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [moderatorListening, setModeratorListening] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const focusStageRef = useRef<HTMLDivElement | null>(null);
+  const pendingPeerIdsRef = useRef<string[] | null>(null);
+  // Stored as a translatable entry so it follows the EN/UA switch.
+  const [nightFeedback, setNightFeedback] = useState<LogEntry | string | null>(null);
+  const [errorEntry, setErrorEntry] = useState<LogEntry | null>(null);
   const [takeoverError, setTakeoverError] = useState<string | null>(null);
   const [selectedNightTargetId, setSelectedNightTargetId] = useState<string | null>(null);
 
@@ -95,11 +110,11 @@ export default function App() {
   }, []);
 
   const me = room?.players.find((p) => p.id === room.myPlayerId) ?? null;
-  const isAwakeAtNight =
-    !room || room.phase !== 'NIGHT' || !me ? true : isPlayerAwakeDuringNight(me, room.nightStep);
+  // Sleeping players go dark at night; eliminated players stay live (only the Graveyard sees them).
+  const mediaAwake = !room || !me ? true : isAwakeForMedia(me, room.phase, room.nightStep);
 
-  const effectiveMicMuted = Boolean(micMuted || me?.modForceMuted || !isAwakeAtNight);
-  const effectiveCamOff = Boolean(camOff || me?.modForceCamHidden || !isAwakeAtNight);
+  const effectiveMicMuted = Boolean(micMuted || me?.modForceMuted || !mediaAwake);
+  const effectiveCamOff = Boolean(camOff || me?.modForceCamHidden || !mediaAwake);
 
   const {
     localStream,
@@ -118,6 +133,47 @@ export default function App() {
     effectiveCamOff,
     noiseFilterEnabled,
   });
+
+  // Peer-to-peer mode: dial the existing players only after our own id is known;
+  // calling earlier silently did nothing, so joiners never connected.
+  useEffect(() => {
+    const pending = pendingPeerIdsRef.current;
+    if (!pending || !room?.myPlayerId) return;
+    pendingPeerIdsRef.current = null;
+    connectToPeers(pending);
+  }, [room?.myPlayerId, connectToPeers]);
+
+  // Focus view: Esc leaves it (the browser handles Esc for real fullscreen first).
+  useEffect(() => {
+    if (!focusedId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !document.fullscreenElement) setFocusedId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusedId]);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // Drop focus if that player left; stop Graveyard listening once the game is over.
+  useEffect(() => {
+    if (focusedId && room && !room.players.some((p) => p.id === focusedId)) setFocusedId(null);
+    if (room && !isGraveyardActive(room.phase)) setModeratorListening(false);
+  }, [room, focusedId]);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = focusStageRef.current;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else if (el.requestFullscreen) {
+      el.requestFullscreen().catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     const s = io(SOCKET_URL, {
@@ -165,7 +221,7 @@ export default function App() {
             if (res?.ok && res.state) {
               setRoom(res.state);
               setLivekit(res.livekit ?? null);
-              if (res.peerIds?.length) connectToPeers(res.peerIds);
+              if (res.peerIds?.length) pendingPeerIdsRef.current = res.peerIds;
             }
           }
         );
@@ -223,12 +279,14 @@ export default function App() {
       if (!socket) return;
       setConnecting(true);
       setErrorMessage(null);
+      setErrorEntry(null);
       socket.emit(
         'room:join',
         { code, nickname, micMuted, camOff },
         (res: {
           ok?: boolean;
           error?: string;
+          errorEntry?: LogEntry;
           code?: string;
           playerId?: string;
           playerToken?: string;
@@ -238,6 +296,7 @@ export default function App() {
         }) => {
           setConnecting(false);
           if (!res?.ok || !res.state) {
+            setErrorEntry(res?.errorEntry ?? null);
             setErrorMessage(res?.error || 'Could not join room.');
             return;
           }
@@ -247,9 +306,8 @@ export default function App() {
           roomCodeRef.current = res.code ?? null;
           setLivekit(res.livekit ?? null);
           setRoom(res.state);
-          if (res.peerIds?.length) {
-            connectToPeers(res.peerIds);
-          }
+          // Connect once this client knows its own player id (set by setRoom above).
+          if (res.peerIds?.length) pendingPeerIdsRef.current = res.peerIds;
         }
       );
     },
@@ -302,14 +360,14 @@ export default function App() {
     socket?.emit(
       'room:claimModerator',
       {},
-      (res: { ok?: boolean; error?: string; moderatorToken?: string; retryInSeconds?: number }) => {
+      (res: { ok?: boolean; error?: string; errorEntry?: LogEntry; moderatorToken?: string; retryInSeconds?: number }) => {
         if (res?.ok && res.moderatorToken) {
           moderatorTokenRef.current = res.moderatorToken;
         } else if (res?.retryInSeconds) {
           setTakeoverError(t.takeoverWait.replace('{s}', String(res.retryInSeconds)));
           window.setTimeout(() => setTakeoverError(null), 4000);
         } else if (res?.error) {
-          setTakeoverError(res.error);
+          setTakeoverError(res.errorEntry ? formatLog(t, res.errorEntry, res.error) : res.error);
           window.setTimeout(() => setTakeoverError(null), 4000);
         }
       }
@@ -337,7 +395,7 @@ export default function App() {
           noiseFilterEnabled={noiseFilterEnabled}
           mediaError={mediaError}
           connecting={connecting}
-          errorMessage={errorMessage}
+          errorMessage={errorEntry ? formatLog(t, errorEntry, errorMessage ?? '') : errorMessage}
           onToggleMic={handleToggleMic}
           onToggleCam={handleToggleCam}
           onToggleNoiseFilter={() => setNoiseFilterEnabled((v) => !v)}
@@ -360,6 +418,72 @@ export default function App() {
     seatFilter === 'alive' ? aliveSeated : seatedPlayers;
   const aliveIds = new Set(aliveSeated.map((p) => p.id));
   const voteTally = tallyVotes(room.votes, aliveIds);
+
+  // ---- Who sees / hears whom (night secrecy + Graveyard), from the shared media policy
+  const mediaCtx = {
+    phase: room.phase,
+    nightStep: room.nightStep,
+    moderatorListeningToGraveyard: moderatorListening,
+  };
+  const graveyardActive = isGraveyardActive(room.phase);
+  const iAmDead = Boolean(me && isInGraveyard(me, room.phase));
+  const seesGraveyardRoom = graveyardActive && (room.isMeModerator || iAmDead);
+  const graveyardPlayers = graveyardActive ? seatedPlayers.filter((p) => !p.isAlive) : [];
+  const tablePlayers = seesGraveyardRoom
+    ? visibleSeatedPlayers.filter((p) => p.isAlive)
+    : visibleSeatedPlayers;
+
+  const tileDisplayFor = (p: (typeof room.players)[number]): TileDisplay => {
+    if (p.id === room.myPlayerId) return 'video';
+    if (perceive(me, p, mediaCtx).see) return 'video';
+    return isInGraveyard(p, room.phase) ? 'graveyard' : 'sleeping';
+  };
+
+  const isAudible = (playerId: string) => {
+    const p = room.players.find((x) => x.id === playerId);
+    if (!p) return false;
+    return perceive(me, p, mediaCtx).hear && !p.micMuted && !p.modForceMuted;
+  };
+
+  const toggleFocus = (playerId: string) => {
+    setFocusedId((cur) => (cur === playerId ? null : playerId));
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  };
+
+  const renderTile = (player: (typeof room.players)[number], size: TileSize) => {
+    const isMe = player.id === room.myPlayerId;
+    const display = tileDisplayFor(player);
+    const hearsThem = isMe || perceive(me, player, mediaCtx).hear;
+    return (
+      <WebcamTile
+        key={`${size}-${player.id}`}
+        t={t}
+        player={player}
+        stream={isMe ? localStream : remoteStreams[player.id] ?? null}
+        isMe={isMe}
+        isSpeaking={Boolean(speakingMap[player.id]) && hearsThem}
+        display={display}
+        ghost={!player.isModerator && isInGraveyard(player, room.phase) && seesGraveyardRoom}
+        viewerIsModerator={room.isMeModerator}
+        voteCount={player.isModerator ? 0 : voteTally.counts[player.id] || 0}
+        isSelectedTarget={!player.isModerator && selectedTileTargetId === player.id}
+        actionButtonLabel={!player.isModerator && player.isAlive ? tileActionLabel : null}
+        size={size}
+        isFocused={focusedId === player.id}
+        seatCount={seatedPlayers.length}
+        onToggleFocus={toggleFocus}
+        onSelectTarget={player.isModerator ? undefined : handleTileTargetSelect}
+        onModeratorRename={(id, name) => emitMod('mod:renamePlayer', { targetPlayerId: id, nickname: name })}
+        onModeratorToggleMute={(id, forceMuted) =>
+          emitMod('mod:setMediaOverride', { targetPlayerId: id, modForceMuted: forceMuted })
+        }
+        onModeratorToggleCamHide={(id, forceHidden) =>
+          emitMod('mod:setMediaOverride', { targetPlayerId: id, modForceCamHidden: forceHidden })
+        }
+        onModeratorSetSeat={(id, seatNumber) => emitMod('mod:setSeat', { targetPlayerId: id, seatNumber })}
+      />
+    );
+  };
 
   let tileActionLabel: string | null = null;
   let selectedTileTargetId: string | null = null;
@@ -393,12 +517,12 @@ export default function App() {
           socket?.emit(
             'game:nightAction',
             { actionType, targetPlayerId: targetId },
-            (res: { ok?: boolean; message?: string; error?: string }) => {
+            (res: { ok?: boolean; message?: string; error?: string; messageEntry?: LogEntry; errorEntry?: LogEntry }) => {
               if (res?.ok) {
                 setSelectedNightTargetId(targetId);
               }
-              if (res?.message) setNightFeedback(res.message);
-              else if (res?.error) setNightFeedback(res.error);
+              if (res?.message) setNightFeedback(res.messageEntry ?? res.message);
+              else if (res?.error) setNightFeedback(res.errorEntry ?? res.error);
             }
           );
         };
@@ -535,7 +659,9 @@ export default function App() {
                         } — ${t.allRolesRevealed}`
                       : room.phase === 'VOTING'
                       ? t.votingOpenBanner
-                      : room.lastMorningSummary || `${t.phaseDay} ${room.dayNumber}`}
+                      : room.lastMorningSummary
+                      ? formatLog(t, room.lastMorningSummary)
+                      : `${t.phaseDay} ${room.dayNumber}`}
                   </span>
                 </div>
                 <span className="font-mono text-[#9CA3AF]">
@@ -574,67 +700,111 @@ export default function App() {
             </div>
           )}
 
-          {/* 2-Column Mobile / 3-4-Column Desktop Grid for up to 16+ players */}
-          <div className="flex-1 overflow-y-auto p-2.5 sm:p-5">
-            <div className="mx-auto max-w-7xl space-y-4">
-              <div className="grid grid-cols-2 gap-2 sm:gap-3.5 md:grid-cols-3 xl:grid-cols-4">
-                {moderatorPlayer && (
-                  <WebcamTile
-                    t={t}
-                    player={moderatorPlayer}
-                    stream={
-                      moderatorPlayer.id === room.myPlayerId
-                        ? localStream
-                        : remoteStreams[moderatorPlayer.id] ?? null
-                    }
-                    isMe={moderatorPlayer.id === room.myPlayerId}
-                    isSpeaking={Boolean(speakingMap[moderatorPlayer.id])}
-                    phase={room.phase}
-                    nightStep={room.nightStep}
-                    viewerIsModerator={room.isMeModerator}
-                    voteCount={0}
-                    isSelectedTarget={false}
-                    actionButtonLabel={null}
-                  />
-                )}
+          {/* Shared audio layer: everyone you're allowed to hear, whatever is on screen */}
+          <RemoteAudio streams={remoteStreams} isAudible={isAudible} />
 
-                {visibleSeatedPlayers.map((player) => (
-                  <WebcamTile
-                    key={player.id}
-                    t={t}
-                    player={player}
-                    stream={
-                      player.id === room.myPlayerId
-                        ? localStream
-                        : remoteStreams[player.id] ?? null
-                    }
-                    isMe={player.id === room.myPlayerId}
-                    isSpeaking={Boolean(speakingMap[player.id])}
-                    phase={room.phase}
-                    nightStep={room.nightStep}
-                    viewerIsModerator={room.isMeModerator}
-                    voteCount={voteTally.counts[player.id] || 0}
-                    isSelectedTarget={selectedTileTargetId === player.id}
-                    actionButtonLabel={player.isAlive ? tileActionLabel : null}
-                    onSelectTarget={handleTileTargetSelect}
-                    onModeratorRename={(id, name) =>
-                      emitMod('mod:renamePlayer', { targetPlayerId: id, nickname: name })
-                    }
-                    onModeratorToggleMute={(id, forceMuted) =>
-                      emitMod('mod:setMediaOverride', {
-                        targetPlayerId: id,
-                        modForceMuted: forceMuted,
-                      })
-                    }
-                    onModeratorToggleCamHide={(id, forceHidden) =>
-                      emitMod('mod:setMediaOverride', {
-                        targetPlayerId: id,
-                        modForceCamHidden: forceHidden,
-                      })
-                    }
-                  />
-                ))}
+          {/* 2-Column Mobile / 3-4-Column Desktop Grid for up to 16+ players */}
+          <div className={`flex-1 p-2.5 sm:p-5 ${focusedId ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-y-auto'}`}>
+            {(() => {
+              const focusedPlayer = focusedId ? room.players.find((p) => p.id === focusedId) ?? null : null;
+              if (!focusedPlayer) return null;
+              const others = [
+                ...(moderatorPlayer && moderatorPlayer.id !== focusedPlayer.id ? [moderatorPlayer] : []),
+                ...seatedPlayers.filter((p) => p.id !== focusedPlayer.id),
+              ];
+              return (
+                <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+                  <div
+                    ref={focusStageRef}
+                    className="relative min-h-0 flex-1 overflow-hidden rounded-xl bg-black"
+                  >
+                    {renderTile(focusedPlayer, 'focus')}
+                    <div className="absolute bottom-12 right-3 flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={toggleFullscreen}
+                        aria-label={isFullscreen ? t.exitFullscreen : t.fullscreen}
+                        className="flex h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-black/70 px-2.5 text-xs font-semibold text-white hover:bg-[#5865F2]"
+                      >
+                        {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                        <span className="hidden sm:inline">{isFullscreen ? t.exitFullscreen : t.fullscreen}</span>
+                      </button>
+                      {!isFullscreen && (
+                        <button
+                          type="button"
+                          onClick={() => setFocusedId(null)}
+                          aria-label={t.exitFocus}
+                          className="flex h-9 items-center gap-1.5 rounded-lg border border-white/15 bg-black/70 px-2.5 text-xs font-semibold text-white hover:bg-white/20"
+                        >
+                          <X className="h-4 w-4" />
+                          <span className="hidden sm:inline">{t.exitFocus}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-2 overflow-x-auto pb-1" aria-label={t.exitFocus}>
+                    {others.map((p) => renderTile(p, 'strip'))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className={`mx-auto max-w-7xl space-y-4 ${focusedId ? 'hidden' : ''}`}>
+              {iAmDead && (
+                <div
+                  role="status"
+                  className="rounded-xl border border-violet-500/30 bg-violet-950/30 px-3.5 py-2.5 text-xs"
+                >
+                  <p className="flex items-center gap-2 font-semibold text-violet-100">
+                    <Ghost className="h-4 w-4 text-violet-300" />
+                    {t.graveyardBannerTitle}
+                  </p>
+                  <p className="mt-0.5 text-violet-200/80">{t.graveyardBannerText}</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2 sm:gap-3.5 md:grid-cols-3 xl:grid-cols-4">
+                {moderatorPlayer && renderTile(moderatorPlayer, 'grid')}
+                {tablePlayers.map((player) => renderTile(player, 'grid'))}
               </div>
+
+              {seesGraveyardRoom && (
+                <section
+                  aria-label={t.graveyardTitle}
+                  data-testid="graveyard"
+                  className="rounded-xl border border-violet-500/25 bg-violet-950/15 p-3"
+                >
+                  <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-200">
+                      <Ghost className="h-4 w-4" />
+                      {t.graveyardTitle} ({graveyardPlayers.length})
+                    </h3>
+                    {room.isMeModerator && (
+                      <button
+                        type="button"
+                        aria-pressed={moderatorListening}
+                        onClick={() => setModeratorListening((v) => !v)}
+                        title={t.graveyardListenHint}
+                        className={`flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold ${
+                          moderatorListening
+                            ? 'border-violet-400/50 bg-violet-600 text-white hover:bg-violet-500'
+                            : 'border-white/15 bg-[#1E222B] text-[#D1D5DB] hover:bg-white/10'
+                        }`}
+                      >
+                        {moderatorListening ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+                        {moderatorListening ? t.stopListenGraveyard : t.listenGraveyard}
+                      </button>
+                    )}
+                  </div>
+                  {graveyardPlayers.length === 0 ? (
+                    <p className="py-3 text-center text-xs text-violet-200/60">{t.graveyardEmpty}</p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3.5 md:grid-cols-3 xl:grid-cols-4">
+                      {graveyardPlayers.map((player) => renderTile(player, 'grid'))}
+                    </div>
+                  )}
+                </section>
+              )}
 
               {seatedPlayers.length === 0 && (
                 <div className="rounded-xl border border-dashed border-white/15 bg-[#161920]/60 p-6 sm:p-8 text-center">
@@ -798,6 +968,7 @@ export default function App() {
                 emitMod('mod:moveSeat', { targetPlayerId: id, direction })
               }
               onKickPlayer={(id) => emitMod('mod:kickPlayer', { targetPlayerId: id })}
+              onShuffleSeats={() => emitMod('mod:shuffleSeats')}
               onTransferModerator={(id) => emitMod('mod:transferModerator', { targetPlayerId: id })}
               onUpdateRoleConfig={(roleConfig: RoleConfig) =>
                 emitMod('mod:updateRoleConfig', { roleConfig })
@@ -840,16 +1011,18 @@ export default function App() {
             <PlayerSidePanel
               t={t}
               room={room}
-              nightFeedback={nightFeedback}
+              nightFeedback={
+                nightFeedback && typeof nightFeedback !== 'string' ? formatLog(t, nightFeedback) : nightFeedback
+              }
               onCastVote={(targetId) => socket?.emit('game:castVote', { targetPlayerId: targetId })}
               onSubmitNightAction={(actionType, targetId) => {
                 socket?.emit(
                   'game:nightAction',
                   { actionType, targetPlayerId: targetId },
-                  (res: { ok?: boolean; message?: string; error?: string }) => {
+                  (res: { ok?: boolean; message?: string; error?: string; messageEntry?: LogEntry; errorEntry?: LogEntry }) => {
                     if (res?.ok) setSelectedNightTargetId(targetId);
-                    if (res?.message) setNightFeedback(res.message);
-                    else if (res?.error) setNightFeedback(res.error);
+                    if (res?.message) setNightFeedback(res.messageEntry ?? res.message);
+                    else if (res?.error) setNightFeedback(res.errorEntry ?? res.error);
                   }
                 );
               }}
