@@ -1,7 +1,9 @@
-import { AudioLines, Camera, CameraOff, Mic, MicOff, Server, Shield, Users } from 'lucide-react';
+import { AudioLines, Camera, CameraOff, ImagePlus, Loader2, Mic, MicOff, Server, Shield, Users } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Language, Translations } from '../shared/i18n';
 import BrandLogo from './BrandLogo';
+import { uploadAvatar } from '../avatarChoice';
+import { PRESET_AVATARS, avatarSrc, sameAvatar, type Avatar } from '../shared/avatars';
 
 interface JoinScreenProps {
   lang: Language;
@@ -19,6 +21,9 @@ interface JoinScreenProps {
   onToggleCam: () => void;
   onToggleNoiseFilter: () => void;
   onRequestMedia: () => void;
+  /** Your avatar (shown when your camera is off); null = your initial letter. */
+  avatar: Avatar | null;
+  onChangeAvatar: (avatar: Avatar | null) => void;
   onCreateRoom: (nickname: string, roomName: string) => void;
   onJoinRoom: (code: string, nickname: string) => void;
 }
@@ -39,9 +44,30 @@ export function JoinScreen({
   onToggleCam,
   onToggleNoiseFilter,
   onRequestMedia,
+  avatar,
+  onChangeAvatar,
   onCreateRoom,
   onJoinRoom,
 }: JoinScreenProps) {
+  const [uploading, setUploading] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const myAvatarSrc = avatarSrc(avatar);
+
+  const handlePickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAvatarError(null);
+    setUploading(true);
+    try {
+      onChangeAvatar(await uploadAvatar(file));
+    } catch {
+      setAvatarError(t.avatarUploadFailed);
+    } finally {
+      setUploading(false);
+    }
+  };
   const [mode, setMode] = useState<'host' | 'join'>(initialRoomCode ? 'join' : 'host');
   const [nickname, setNickname] = useState('');
   const [roomName, setRoomName] = useState('Friday Night Mafia');
@@ -152,9 +178,17 @@ export function JoinScreen({
                   />
                 ) : (
                   <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-[#1E222B] text-2xl font-bold text-white">
-                      {displayInitial}
-                    </div>
+                    {myAvatarSrc ? (
+                      <img
+                        src={myAvatarSrc}
+                        alt=""
+                        className="h-20 w-20 rounded-full object-cover ring-2 ring-white/15"
+                      />
+                    ) : (
+                      <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-[#1E222B] text-2xl font-bold text-white">
+                        {displayInitial}
+                      </div>
+                    )}
                     <p className="text-xs text-[#9CA3AF]">
                       {camOff ? t.camTurnedOff : t.camNotConnected}
                     </p>
@@ -344,6 +378,64 @@ export function JoinScreen({
                     : t.joinGameTable}
                 </button>
               </form>
+            </div>
+
+            {/* Avatar strip: your current avatar (tap to upload any picture) + ready-made ones */}
+            <div className="mt-4" data-testid="avatar-strip">
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  aria-label={t.avatarUpload}
+                  title={t.avatarUpload}
+                  className="relative h-12 w-12 shrink-0 rounded-full border border-dashed border-white/25 bg-[#0F1115] text-[#9CA3AF] transition-colors hover:border-[#5865F2] hover:text-white disabled:opacity-60"
+                >
+                  {myAvatarSrc ? (
+                    <img src={myAvatarSrc} alt="" className="h-full w-full rounded-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-sm font-bold">
+                      {displayInitial}
+                    </span>
+                  )}
+                  <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border border-[#171A21] bg-[#5865F2] text-white">
+                    {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImagePlus className="h-3 w-3" />}
+                  </span>
+                </button>
+                <div className="h-8 w-px bg-white/10" />
+                <div className="flex items-center gap-2">
+                  {PRESET_AVATARS.map((p) => {
+                    const choice: Avatar = { kind: 'preset', id: p.id };
+                    const selected = sameAvatar(avatar, choice);
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => onChangeAvatar(selected ? null : choice)}
+                        aria-label={p.label}
+                        aria-pressed={selected}
+                        title={p.label}
+                        className={`h-10 w-10 overflow-hidden rounded-full transition ${
+                          selected
+                            ? 'ring-2 ring-[#5865F2] ring-offset-2 ring-offset-[#171A21]'
+                            : 'opacity-80 ring-1 ring-white/10 hover:opacity-100'
+                        }`}
+                      >
+                        <img src={p.src} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    );
+                  })}
+                </div>
+                <span className="ml-auto hidden text-right text-[11px] leading-tight text-[#6B7280] sm:block">
+                  {t.avatarHint}
+                </span>
+              </div>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handlePickFile} />
+              {avatarError && (
+                <p className="mt-2 text-xs text-rose-400" role="alert">
+                  {avatarError}
+                </p>
+              )}
             </div>
 
             <div className="mt-5 border-t border-white/10 pt-4 text-xs text-[#9CA3AF]">

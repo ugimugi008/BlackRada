@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { avatarSrc } from '../shared/avatars';
 import type { Translations } from '../shared/i18n';
 import { ROLE_META, formatSeatNumber, type PlayerRecord } from '../shared/mafiaEngine';
 
@@ -200,6 +201,16 @@ export function WebcamTile({
           />
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2">
+            {player.isAlive && display !== 'sleeping' && avatarSrc(player.avatar) ? (
+              <img
+                src={avatarSrc(player.avatar) ?? undefined}
+                alt=""
+                data-testid="tile-avatar"
+                className={`rounded-full object-cover ring-2 ring-white/10 ${
+                  isSmall ? 'h-9 w-9' : 'aspect-square h-[52%] max-h-40 w-auto sm:h-[58%]'
+                }`}
+              />
+            ) : (
             <div
               className={`flex ${
                 isSmall ? 'h-9 w-9 text-base' : 'h-11 w-11 text-lg sm:h-14 sm:w-14 sm:text-xl'
@@ -217,6 +228,7 @@ export function WebcamTile({
                 initial
               )}
             </div>
+            )}
             {display === 'sleeping' && !isSmall && (
               <span className="text-[11px] font-medium text-[#9CA3AF]">{t.eyesClosed}</span>
             )}

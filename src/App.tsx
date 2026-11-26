@@ -36,6 +36,8 @@ import { useGameSounds } from './hooks/useGameSounds';
 import { useWakeLock } from './hooks/useWakeLock';
 import { capPhoneHd, isPhoneDevice, pickVideoLayer, type VideoLayer } from './shared/videoQuality';
 import { clampVolume, loadVolumes, saveVolumes, volumeKey, type VolumeMap } from './volumes';
+import { loadAvatarChoice, saveAvatarChoice } from './avatarChoice';
+import type { Avatar } from './shared/avatars';
 import { WebcamTile, type TileDisplay, type TileSize } from './components/WebcamTile';
 import { useMediaRoom, type LiveKitCredentials, type RemotePref } from './hooks/useMediaRoom';
 import { formatLog, type LogEntry } from './shared/gameLog';
@@ -113,7 +115,13 @@ export default function App() {
   const [moderatorListening, setModeratorListening] = useState(false);
   const [graveyardOpen, setGraveyardOpen] = useState(false); // Moderator: collapsed by default
   const [graveyardMuted, setGraveyardMuted] = useState(false); // eliminated player: focus on the game
-  const [volumes, setVolumes] = useState<VolumeMap>(() => loadVolumes()); // per-nickname, this device only
+  const [volumes, setVolumes] = useState<VolumeMap>(() => loadVolumes());
+  // Your avatar (shown when your camera is off), remembered on this device.
+  const [avatar, setAvatarState] = useState<Avatar | null>(() => loadAvatarChoice());
+  const setAvatar = useCallback((next: Avatar | null) => {
+    setAvatarState(next);
+    saveAvatarChoice(next);
+  }, []); // per-nickname, this device only
   const [isFullscreen, setIsFullscreen] = useState(false);
   const focusStageRef = useRef<HTMLDivElement | null>(null);
   const pendingPeerIdsRef = useRef<string[] | null>(null);
@@ -403,7 +411,7 @@ export default function App() {
       setErrorMessage(null);
       socket.emit(
         'room:create',
-        { nickname, roomName, micMuted, camOff },
+        { nickname, roomName, avatar, micMuted, camOff },
         (res: {
           ok?: boolean;
           error?: string;
@@ -429,7 +437,7 @@ export default function App() {
         }
       );
     },
-    [socket, micMuted, camOff]
+    [socket, avatar, micMuted, camOff]
   );
 
   const handleJoinRoom = useCallback(
@@ -440,7 +448,7 @@ export default function App() {
       setErrorEntry(null);
       socket.emit(
         'room:join',
-        { code, nickname, micMuted, camOff },
+        { code, nickname, avatar, micMuted, camOff },
         (res: {
           ok?: boolean;
           error?: string;
@@ -470,7 +478,7 @@ export default function App() {
         }
       );
     },
-    [socket, micMuted, camOff, connectToPeers]
+    [socket, avatar, micMuted, camOff, connectToPeers]
   );
 
   useEffect(() => {
@@ -590,6 +598,8 @@ export default function App() {
           onRequestMedia={() => {
             void initLocalMedia(true, true);
           }}
+          avatar={avatar}
+          onChangeAvatar={setAvatar}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
         />

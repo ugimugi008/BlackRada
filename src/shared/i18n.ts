@@ -37,6 +37,9 @@ export interface Translations extends LogDictionary {
   roomCode: string;
   connecting: string;
   createModRoom: string;
+  avatarUpload: string;
+  avatarHint: string;
+  avatarUploadFailed: string;
   joinGameTable: string;
   hostNote: string;
   playerNote: string;
@@ -246,6 +249,9 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     roomCode: 'Room Code',
     connecting: 'Connecting...',
     createModRoom: 'Create Moderator Room',
+    avatarUpload: 'Upload any picture as your avatar',
+    avatarHint: 'Shown when your camera is off',
+    avatarUploadFailed: "Couldn't use that picture. Try another one.",
     joinGameTable: 'Join Game Table',
     hostNote:
       'Moderators sit outside the town roster, rename any player, deal or override secret roles, and step through each Night phase.',
@@ -475,6 +481,9 @@ export const TRANSLATIONS: Record<Language, Translations> = {
     roomCode: 'Код кімнати',
     connecting: 'Підключення...',
     createModRoom: 'Створити кімнату Ведучого',
+    avatarUpload: 'Завантажити будь-яке фото як аватар',
+    avatarHint: 'Видно, коли камера вимкнена',
+    avatarUploadFailed: 'Не вдалося використати це фото. Спробуйте інше.',
     joinGameTable: 'Приєднатися до столу',
     hostNote:
       'Ведучий сидить окремо від гравців, змінює нікнейми, роздає чи коригує ролі та запускає кожен етап Ночі.',

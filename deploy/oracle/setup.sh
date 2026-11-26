@@ -47,7 +47,7 @@ EOF
 # ---------------------------------------------------------------- arguments
 # Bump when this script changes, so "blackrada update" switches to the new copy
 # right after downloading it (instead of finishing with the old one).
-SETUP_VERSION=2
+SETUP_VERSION=3
 ORIG_ARGS=("$@")
 DOMAIN=""; DUCKDNS_TOKEN=""; ACME_EMAIL=""; REUSE=0
 while [[ $# -gt 0 ]]; do
@@ -262,6 +262,10 @@ services:
       LIVEKIT_URL: wss://${DOMAIN}/livekit
       LIVEKIT_API_KEY: \${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: \${LIVEKIT_API_SECRET}
+      AVATAR_DIR: /app/data/avatars
+    volumes:
+      # uploaded avatar photos live outside the container, so updates keep them
+      - ./data:/app/data
     restart: unless-stopped
 
   livekit:

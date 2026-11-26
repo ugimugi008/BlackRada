@@ -1,3 +1,4 @@
+import type { Avatar } from './avatars';
 import type { LogEntry } from './gameLog';
 
 export type MafiaRole = 'mafia' | 'don' | 'sheriff' | 'doctor' | 'villager';
@@ -18,6 +19,8 @@ export interface RoleConfig {
 export interface PlayerRecord {
   id: string;
   nickname: string;
+  /** Shown on the tile when the camera is off; null = show the initial letter. */
+  avatar?: Avatar | null;
   seatNumber: number; // 1-based for seated players, 0 for Moderator
   isModerator: boolean;
   isAlive: boolean;
