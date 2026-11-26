@@ -30,6 +30,7 @@ import { JoinScreen } from './components/JoinScreen';
 import { ModeratorPanel } from './components/ModeratorPanel';
 import { PlayerSidePanel } from './components/PlayerSidePanel';
 import { RemoteAudio } from './components/RemoteAudio';
+import { AutoGrid } from './components/AutoGrid';
 import { clampVolume, loadVolumes, saveVolumes, volumeKey, type VolumeMap } from './volumes';
 import { WebcamTile, type TileDisplay, type TileSize } from './components/WebcamTile';
 import { useMediaRoom, type LiveKitCredentials, type RemotePref } from './hooks/useMediaRoom';
@@ -1043,7 +1044,10 @@ export default function App() {
           <RemoteAudio streams={remoteStreams} isAudible={isAudible} volumeOf={volumeOf} />
 
           {/* 2-Column Mobile / 3-4-Column Desktop Grid for up to 16+ players */}
-          <div className={`flex-1 p-2.5 sm:p-5 ${focusedId ? 'flex min-h-0 flex-col overflow-hidden' : 'overflow-y-auto'}`}>
+          <div
+            data-grid-scroll
+            className={`min-h-0 flex-1 p-2.5 sm:p-5 ${focusedId ? 'flex flex-col overflow-hidden' : 'overflow-y-auto [scrollbar-gutter:stable]'}`}
+          >
             {(() => {
               const focusedPlayer = focusedId ? room.players.find((p) => p.id === focusedId) ?? null : null;
               if (!focusedPlayer) return null;
@@ -1088,8 +1092,9 @@ export default function App() {
               );
             })()}
 
-            <div className={`mx-auto max-w-7xl space-y-4 ${focusedId ? 'hidden' : ''}`}>
-              {iAmDead && (
+            <div className={focusedId ? 'hidden' : ''}>
+              <div data-grid-reserve className={iAmDead ? 'pb-4' : ''}>
+                {iAmDead && (
                 <div
                   role="status"
                   className="rounded-xl border border-violet-500/30 bg-violet-950/30 px-3.5 py-2.5 text-xs"
@@ -1100,13 +1105,22 @@ export default function App() {
                   </p>
                   <p className="mt-0.5 text-violet-200/80">{t.graveyardBannerText}</p>
                 </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-2 sm:gap-3.5 md:grid-cols-3 xl:grid-cols-4">
-                {moderatorPlayer && renderTile(moderatorPlayer, 'grid')}
-                {tablePlayers.map((player) => renderTile(player, 'grid'))}
+                )}
               </div>
 
+              {/* Discord-style grid: tiles grow to fill the space and glide when people join or leave */}
+              <AutoGrid
+                sectionGap={0}
+                items={[...(moderatorPlayer ? [moderatorPlayer] : []), ...tablePlayers].map((player) => ({
+                  key: player.id,
+                  node: renderTile(player, 'grid'),
+                }))}
+              />
+
+              <div
+                data-grid-reserve
+                className={seesGraveyardRoom || seatedPlayers.length === 0 ? 'space-y-4 pt-4' : ''}
+              >
               {seesGraveyardRoom && (
                 <section
                   aria-label={t.graveyardTitle}
@@ -1197,6 +1211,7 @@ export default function App() {
                   </button>
                 </div>
               )}
+              </div>
             </div>
           </div>
 
