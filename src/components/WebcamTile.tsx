@@ -495,13 +495,7 @@ export function WebcamTile({
                     aria-expanded={volumeOpen}
                     aria-label={`${t.volumeTitle}: ${player.nickname} (${Math.round(volume * 100)}%)`}
                     title={`${t.volumeTitle}: ${Math.round(volume * 100)}%`}
-                    className={`flex h-6 items-center gap-0.5 rounded px-1 text-[10px] font-semibold ${
-                      volume === 0
-                        ? 'bg-rose-600/90 text-white'
-                        : volume !== 1
-                        ? 'bg-[#5865F2]/90 text-white'
-                        : 'text-[#D1D5DB] hover:bg-white/15'
-                    }`}
+                    className="flex h-6 w-6 items-center justify-center rounded text-[#D1D5DB] hover:bg-white/15"
                   >
                     {volume === 0 ? (
                       <VolumeX className="h-3.5 w-3.5" />
@@ -510,7 +504,6 @@ export function WebcamTile({
                     ) : (
                       <Volume2 className="h-3.5 w-3.5" />
                     )}
-                    {volume !== 1 && <span>{Math.round(volume * 100)}%</span>}
                   </button>
                 )}
                 {effectiveMuted && display !== 'graveyard' && (
