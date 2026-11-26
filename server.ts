@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,11 +28,35 @@ import {
   type WinnerSide,
 } from './src/shared/mafiaEngine.ts';
 import { LOG_EN, formatLog, type LogEntry, type LogParams } from './src/shared/gameLog.ts';
+import {
+  AVATAR_ID_PATTERN,
+  MAX_AVATAR_BYTES,
+  parseAvatar,
+  photoIdFromUrl,
+  sniffImageType,
+  type Avatar,
+} from './src/shared/avatars.ts';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ---- uploaded avatar photos (kept on disk; in Docker this folder is a volume, so it survives updates)
+const AVATAR_DIR = path.resolve(process.env.AVATAR_DIR || path.join(__dirname, 'data', 'avatars'));
+const AVATAR_EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' };
+const AVATAR_MIME: Record<string, string> = Object.fromEntries(Object.entries(AVATAR_EXT).map(([m, e]) => [e, m]));
+/** Unused uploaded photos are deleted after this long. */
+const AVATAR_KEEP_MS = 30 * 24 * 60 * 60 * 1000;
+
+function avatarFile(id: string): string | null {
+  if (!AVATAR_ID_PATTERN.test(id)) return null;
+  for (const ext of Object.values(AVATAR_EXT)) {
+    const file = path.join(AVATAR_DIR, `${id}.${ext}`);
+    if (fs.existsSync(file)) return file;
+  }
+  return null;
+}
 const PORT = Number(process.env.PORT || 3000);
 const IS_PROD = process.env.NODE_ENV === 'production';
 const LIVEKIT_URL = (process.env.LIVEKIT_URL || '').trim();
@@ -97,6 +122,46 @@ interface RoomInternal {
 }
 
 const rooms = new Map<string, RoomInternal>();
+
+/** A clean avatar from a join request; uploaded photos must exist on this server. */
+function resolveAvatar(raw: unknown): Avatar | null {
+  const avatar = parseAvatar(raw);
+  if (avatar?.kind === 'photo') {
+    const file = avatarFile(photoIdFromUrl(avatar.url) ?? '');
+    if (!file) return null;
+    const now = new Date();
+    try {
+      fs.utimesSync(file, now, now); // in use: keep it
+    } catch {
+      /* ignore */
+    }
+  }
+  return avatar;
+}
+
+function pruneAvatars(): void {
+  const inUse = new Set<string>();
+  for (const room of rooms.values()) {
+    for (const p of room.players) if (p.avatar?.kind === 'photo') inUse.add(photoIdFromUrl(p.avatar.url) ?? '');
+  }
+  let files: string[] = [];
+  try {
+    files = fs.readdirSync(AVATAR_DIR);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - AVATAR_KEEP_MS;
+  for (const name of files) {
+    const id = name.split('.')[0];
+    if (inUse.has(id)) continue;
+    const file = path.join(AVATAR_DIR, name);
+    try {
+      if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);
+    } catch {
+      /* ignore */
+    }
+  }
+}
 const socketIndex = new Map<string, { roomCode: string; playerId: string }>();
 
 function generateRoomCode(): string {
@@ -283,6 +348,46 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '100kb' }));
 
+  // ---- avatar photos: upload (small square images made by the browser) and serve
+  fs.mkdirSync(AVATAR_DIR, { recursive: true });
+  pruneAvatars();
+  setInterval(pruneAvatars, 6 * 60 * 60 * 1000).unref();
+
+  app.post('/api/avatar', express.raw({ type: () => true, limit: MAX_AVATAR_BYTES }), (req, res) => {
+    const type = String(req.headers['content-type'] || '').toLowerCase();
+    if (!type.startsWith('image/') && !type.startsWith('application/octet-stream')) {
+      res.status(415).json({ error: 'Only images can be uploaded.' });
+      return;
+    }
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const real = sniffImageType(body);
+    if (!real) {
+      res.status(400).json({ error: 'That file is not a picture.' });
+      return;
+    }
+    const id = crypto.randomBytes(12).toString('hex');
+    fs.writeFileSync(path.join(AVATAR_DIR, `${id}.${AVATAR_EXT[real]}`), body);
+    res.status(201).json({ url: `/api/avatar/${id}` });
+  });
+  app.use('/api/avatar', (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if ((err as { type?: string } | null)?.type === 'entity.too.large') {
+      res.status(413).json({ error: 'Picture is too big (max 150 KB).' });
+      return;
+    }
+    next(err);
+  });
+  app.get('/api/avatar/:id', (req, res) => {
+    const file = avatarFile(String(req.params.id || ''));
+    if (!file) {
+      res.status(404).json({ error: 'Not found.' });
+      return;
+    }
+    res.setHeader('Content-Type', AVATAR_MIME[path.extname(file).slice(1)] || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.sendFile(file);
+  });
+
   app.get('/api/health', (_req, res) => {
     res.json({
       ok: true,
@@ -354,6 +459,7 @@ async function startServer() {
         payload: {
           nickname?: string;
           roomName?: string;
+          avatar?: unknown;
           micMuted?: boolean;
           camOff?: boolean;
         },
@@ -369,6 +475,7 @@ async function startServer() {
         const moderator: PlayerRecord = {
           id: playerId,
           nickname,
+          avatar: resolveAvatar(payload?.avatar),
           seatNumber: 0,
           isModerator: true,
           isAlive: true,
@@ -440,6 +547,7 @@ async function startServer() {
         payload: {
           code?: string;
           nickname?: string;
+          avatar?: unknown;
           micMuted?: boolean;
           camOff?: boolean;
           reconnectPlayerId?: string;
@@ -524,6 +632,7 @@ async function startServer() {
         const newPlayer: PlayerRecord = {
           id: playerId,
           nickname,
+          avatar: resolveAvatar(payload?.avatar),
           seatNumber: seatedCount + 1,
           isModerator: false,
           isAlive: room.phase === 'LOBBY',
