@@ -17,7 +17,7 @@ export interface PresetAvatar {
 
 export const PRESET_AVATARS: readonly PresetAvatar[] = [
   { id: 'oni', label: 'Oni', src: '/avatars/oni.webp' },
-  { id: 'fox', label: 'Winter fox', src: '/avatars/fox.webp' },
+  { id: 'dog', label: 'Doggo', src: '/avatars/dog.webp' },
   { id: 'ukraine', label: 'Ukraine', src: '/avatars/ukraine.webp' },
   { id: 'kitty', label: 'Kitty', src: '/avatars/kitty.webp' },
 ];

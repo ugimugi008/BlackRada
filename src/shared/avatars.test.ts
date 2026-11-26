@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { avatarSrc, parseAvatar, photoIdFromUrl, sameAvatar, sniffImageType } from './avatars';
 
 test('accepts the built-in avatars and real uploaded-photo links', () => {
-  assert.deepEqual(parseAvatar({ kind: 'preset', id: 'fox' }), { kind: 'preset', id: 'fox' });
+  assert.deepEqual(parseAvatar({ kind: 'preset', id: 'dog' }), { kind: 'preset', id: 'dog' });
   const url = '/api/avatar/0123456789abcdef01234567';
   assert.deepEqual(parseAvatar({ kind: 'photo', url }), { kind: 'photo', url });
   assert.equal(photoIdFromUrl(url), '0123456789abcdef01234567');
@@ -14,6 +14,7 @@ test('rejects anything else (falls back to the initial letter)', () => {
     null,
     'fox',
     { kind: 'preset', id: 'nope' },
+    { kind: 'preset', id: 'fox' }, // removed avatar: falls back to the initial letter
     { kind: 'photo', url: 'https://evil.example/x.png' },
     { kind: 'photo', url: '/api/avatar/../../server.ts' },
     { kind: 'photo', url: 'data:image/png;base64,AAAA' },
