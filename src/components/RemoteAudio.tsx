@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { audioContext } from '../audio/context';
 
 interface RemoteAudioProps {
   streams: Record<string, MediaStream>;
@@ -38,22 +39,6 @@ export function RemoteAudio({ streams, isAudible, volumeOf }: RemoteAudioProps) 
 // echo cancellation intact on laptops. Above 100% (boosting a quiet friend),
 // and on iPhones/iPads where element volume is read-only, we route the sound
 // through a Web Audio gain node instead.
-
-let sharedContext: AudioContext | null = null;
-function audioContext(): AudioContext | null {
-  if (sharedContext) return sharedContext;
-  const Ctor =
-    window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!Ctor) return null;
-  sharedContext = new Ctor();
-  // Browsers start audio contexts suspended until the user interacts.
-  const resume = () => {
-    sharedContext?.resume().catch(() => {});
-  };
-  document.addEventListener('pointerdown', resume);
-  document.addEventListener('keydown', resume);
-  return sharedContext;
-}
 
 let elementVolumeWorks: boolean | null = null;
 function canSetElementVolume(): boolean {

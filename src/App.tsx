@@ -32,6 +32,8 @@ import { PlayerSidePanel } from './components/PlayerSidePanel';
 import { RemoteAudio } from './components/RemoteAudio';
 import { AutoGrid } from './components/AutoGrid';
 import { useTileSizes } from './hooks/useTileSizes';
+import { useGameSounds } from './hooks/useGameSounds';
+import { useWakeLock } from './hooks/useWakeLock';
 import { capPhoneHd, isPhoneDevice, pickVideoLayer, type VideoLayer } from './shared/videoQuality';
 import { clampVolume, loadVolumes, saveVolumes, volumeKey, type VolumeMap } from './volumes';
 import { WebcamTile, type TileDisplay, type TileSize } from './components/WebcamTile';
@@ -92,6 +94,9 @@ export default function App() {
   const [rejoining, setRejoining] = useState(Boolean(restored));
   const [socket, setSocket] = useState<Socket | null>(null);
   const [room, setRoom] = useState<RoomPublicState | null>(null);
+  // Sound cues (night / morning / last 5 s of a speech) and keeping phones awake at the table.
+  useGameSounds(room);
+  useWakeLock(!!room);
   const [livekit, setLivekit] = useState<LiveKitCredentials | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

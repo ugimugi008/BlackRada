@@ -45,6 +45,10 @@ EOF
 }
 
 # ---------------------------------------------------------------- arguments
+# Bump when this script changes, so "blackrada update" switches to the new copy
+# right after downloading it (instead of finishing with the old one).
+SETUP_VERSION=2
+ORIG_ARGS=("$@")
 DOMAIN=""; DUCKDNS_TOKEN=""; ACME_EMAIL=""; REUSE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -137,7 +141,7 @@ fi
 say "Installing Docker and tools (takes a minute or two the first time)"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl git openssl cron >/dev/null
+apt-get install -y -qq ca-certificates curl git openssl cron vnstat >/dev/null
 if ! command -v docker >/dev/null 2>&1; then
   apt-get install -y -qq docker.io >/dev/null
 fi
@@ -146,6 +150,8 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 systemctl enable --now docker >/dev/null 2>&1 || true
 systemctl enable --now cron >/dev/null 2>&1 || true
+# vnstat counts the server's network traffic, for the monthly data meter in "blackrada status".
+systemctl enable --now vnstat >/dev/null 2>&1 || true
 docker compose version >/dev/null 2>&1 || die "Docker Compose did not install."
 ok "$(docker --version)"
 
@@ -176,6 +182,14 @@ else
   git clone -q --depth 1 "$REPO_URL" "$APP_DIR"
 fi
 ok "Code at $(git -C "$APP_DIR" log -1 --format='%h %s')"
+
+# If the freshly downloaded setup script is newer than the one running, continue with it.
+NEW_SETUP="$APP_DIR/deploy/oracle/setup.sh"
+NEW_VERSION=$(grep -m1 -oP '^SETUP_VERSION=\K[0-9]+' "$NEW_SETUP" 2>/dev/null || echo 0)
+if [[ -z "${BLACKRADA_REEXEC:-}" && "$NEW_VERSION" != "$SETUP_VERSION" ]]; then
+  export BLACKRADA_REEXEC=1
+  exec bash "$NEW_SETUP" "${ORIG_ARGS[@]}"
+fi
 
 # ---------------------------------------------------------------- secrets
 if [[ ! -f "$SECRETS_FILE" ]]; then
@@ -292,6 +306,16 @@ case "${1:-status}" in
     echo -n "Video: "; curl -fsS --max-time 5 http://127.0.0.1:7880 || echo "not responding"
     echo
     echo "Open:  https://${DOMAIN}"
+    # Data sent out this calendar month (what Oracle's free 10 TB/month allowance counts).
+    IFACE=$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')
+    LINE=$(vnstat ${IFACE:+-i "$IFACE"} --oneline b 2>/dev/null || true)
+    if [[ "$LINE" == *";"*";"* ]]; then
+      SENT=$(echo "$LINE" | cut -d';' -f10)
+      MONTH=$(echo "$LINE" | cut -d';' -f8)
+      awk -v b="$SENT" -v m="$MONTH" 'BEGIN { printf "Data:  %.2f TB of 10 TB sent in %s (%.1f%%); resets on the 1st\n", b / 1e12, m, b / 1e11 }'
+    else
+      echo "Data:  meter is starting; check again in a few minutes"
+    fi
     ;;
   *) echo "Usage: sudo blackrada [status|update|restart|logs [app|livekit|caddy]|stop]" ;;
 esac
