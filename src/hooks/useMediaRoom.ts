@@ -2,6 +2,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  VideoPreset,
   VideoPresets,
   VideoQuality,
   type RemoteParticipant,
@@ -25,18 +26,24 @@ export interface RemotePref {
 }
 
 const VIDEO_QUALITY: Record<Exclude<RemoteVideoPref, 'off'>, VideoQuality> = {
-  low: VideoQuality.LOW, // 180p layer
-  medium: VideoQuality.MEDIUM, // 360p layer
+  low: VideoQuality.LOW, // 360p layer
+  medium: VideoQuality.MEDIUM, // 540p layer
   high: VideoQuality.HIGH, // 720p layer
 };
 
-// Publish 720p with 360p and 180p simulcast layers; the server forwards each
+// Publish 720p with 540p and 360p simulcast layers; the server forwards each
 // viewer only the layer they asked for (dynacast stops layers nobody needs).
+// Bitrates are generous so faces stay clean in dim rooms. VP8 on purpose: VP9/AV1
+// in LiveKit use SVC with fixed half-size steps (720/360/180, no 540p) and are
+// heavy to encode on phones.
+const LAYER_540 = new VideoPreset(960, 540, 1_200_000, 30);
+const LAYER_360 = new VideoPreset(640, 360, 600_000, 30);
 const CAMERA_PUBLISH = {
   source: Track.Source.Camera,
   simulcast: true,
-  videoEncoding: { maxBitrate: 1_500_000, maxFramerate: 30 },
-  videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+  videoCodec: 'vp8' as const,
+  videoEncoding: { maxBitrate: 2_500_000, maxFramerate: 30 },
+  videoSimulcastLayers: [LAYER_360, LAYER_540],
 };
 
 /** Peer-to-peer mesh sends a separate copy to every peer, so keep it light. */
@@ -250,7 +257,7 @@ export function useMediaRoom({
       },
       publishDefaults: {
         simulcast: true,
-        videoSimulcastLayers: [VideoPresets.h180, VideoPresets.h360],
+        videoSimulcastLayers: [LAYER_360, LAYER_540],
       },
     });
     lkRoomRef.current = lkRoom;

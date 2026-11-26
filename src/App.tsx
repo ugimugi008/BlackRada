@@ -31,6 +31,8 @@ import { ModeratorPanel } from './components/ModeratorPanel';
 import { PlayerSidePanel } from './components/PlayerSidePanel';
 import { RemoteAudio } from './components/RemoteAudio';
 import { AutoGrid } from './components/AutoGrid';
+import { useTileSizes } from './hooks/useTileSizes';
+import { capPhoneHd, isPhoneDevice, pickVideoLayer, type VideoLayer } from './shared/videoQuality';
 import { clampVolume, loadVolumes, saveVolumes, volumeKey, type VolumeMap } from './volumes';
 import { WebcamTile, type TileDisplay, type TileSize } from './components/WebcamTile';
 import { useMediaRoom, type LiveKitCredentials, type RemotePref } from './hooks/useMediaRoom';
@@ -156,7 +158,9 @@ export default function App() {
   const effectiveCamOff = Boolean(camOff || me?.modForceCamHidden || !mediaAwake);
 
   // What to receive from each remote player (LiveKit mode): nothing for people this
-  // viewer may not see/hear, and a video layer sized to how big their tile is.
+  // viewer may not see/hear, and a video layer sized to how big their tile really is
+  // on this screen (see shared/videoQuality.ts).
+  const tileSizes = useTileSizes();
   const remotePrefs = useMemo(() => {
     const prefs: Record<string, RemotePref> = {};
     if (!room || !me) return prefs;
@@ -167,22 +171,32 @@ export default function App() {
       deadViewerMutedGraveyard: graveyardMuted,
       lastWordsPlayerId: room.lastWords?.playerId ?? null,
     };
-    const narrow = typeof window !== 'undefined' && window.innerWidth < 768;
-    const gridTiles = room.players.filter((p) => seatFilter === 'all' || p.isAlive || p.isModerator).length;
-    const gridQuality: RemotePref['video'] = gridTiles <= 4 ? 'high' : narrow && gridTiles > 6 ? 'low' : 'medium';
+    const phone = isPhoneDevice();
+    const pixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+    // The person enlarged / giving a speech / last words gets 720p first on phones.
+    const hdPriority = [focusedId, room.talk?.playerId, room.lastWords?.playerId];
+    let layers: Record<string, VideoLayer> = {};
+    for (const p of room.players) {
+      if (p.id === me.id) continue;
+      layers[p.id] = hdPriority.includes(p.id) ? 'high' : pickVideoLayer(tileSizes[p.id], { phone, pixelRatio });
+    }
+    if (phone) layers = capPhoneHd(layers, tileSizes, hdPriority);
     for (const p of room.players) {
       if (p.id === me.id) continue;
       const perc = perceive(me, p, ctx);
-      let video: RemotePref['video'] = gridQuality;
+      let video: RemotePref['video'] = layers[p.id];
       if (!perc.see || p.camOff || p.modForceCamHidden) video = 'off';
-      else if (focusedId) video = focusedId === p.id ? 'high' : 'low';
       else if (me.isModerator && isInGraveyard(p, room.phase) && p.id !== room.lastWords?.playerId && !graveyardOpen)
         video = 'off';
       else if (seatFilter === 'alive' && !p.isAlive && !p.isModerator) video = 'off';
       prefs[p.id] = { video, audio: perc.hear };
     }
     return prefs;
-  }, [room, me, focusedId, moderatorListening, graveyardMuted, graveyardOpen, seatFilter]);
+  }, [room, me, focusedId, moderatorListening, graveyardMuted, graveyardOpen, seatFilter, tileSizes]);
+  // Readable from the console / browser tests: which video layer we ask for, per player.
+  useEffect(() => {
+    (window as unknown as { __blackRadaVideoPrefs?: unknown }).__blackRadaVideoPrefs = remotePrefs;
+  }, [remotePrefs]);
 
   const {
     localStream,
