@@ -2,6 +2,7 @@ import { AudioLines, Camera, CameraOff, Mic, MicOff, Server, Shield, Users } fro
 import { useEffect, useRef, useState } from 'react';
 import type { Language, Translations } from '../shared/i18n';
 import BrandLogo from './BrandLogo';
+import { AvatarView, CHARACTERS, CharacterAvatar, EMBLEMS, EmblemAvatar, type AvatarChoice } from './Avatars';
 
 interface JoinScreenProps {
   lang: Language;
@@ -43,6 +44,9 @@ export function JoinScreen({
   onJoinRoom,
 }: JoinScreenProps) {
   const [mode, setMode] = useState<'host' | 'join'>(initialRoomCode ? 'join' : 'host');
+  // PROTOTYPE: avatar picker
+  const [avatar, setAvatar] = useState<AvatarChoice>({ kind: 'character', id: 'don' });
+  const [avatarTab, setAvatarTab] = useState<'character' | 'emblem'>('character');
   const [nickname, setNickname] = useState('');
   const [roomName, setRoomName] = useState('Friday Night Mafia');
   const [roomCode, setRoomCode] = useState(initialRoomCode);
@@ -152,8 +156,8 @@ export function JoinScreen({
                   />
                 ) : (
                   <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/15 bg-[#1E222B] text-2xl font-bold text-white">
-                      {displayInitial}
+                    <div className="rounded-full ring-2 ring-white/10">
+                      <AvatarView choice={avatar} size={104} />
                     </div>
                     <p className="text-xs text-[#9CA3AF]">
                       {camOff ? t.camTurnedOff : t.camNotConnected}
@@ -292,6 +296,58 @@ export function JoinScreen({
                     placeholder={mode === 'host' ? t.nicknamePlaceholderHost : t.nicknamePlaceholderJoin}
                     className="mt-1.5 h-11 w-full rounded-lg border border-white/15 bg-[#0F1115] px-3.5 text-sm text-white placeholder-[#6B7280] focus:border-[#5865F2] focus:outline-none"
                   />
+                </div>
+
+                {/* PROTOTYPE: avatar picker */}
+                <div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="block text-xs font-semibold text-[#D1D5DB]">
+                      Avatar <span className="font-normal text-[#6B7280]">· shows when your camera is off</span>
+                    </span>
+                    <div className="flex gap-1 rounded-md border border-white/10 bg-[#0F1115] p-0.5" role="tablist">
+                      {(['character', 'emblem'] as const).map((k) => (
+                        <button
+                          key={k}
+                          type="button"
+                          role="tab"
+                          aria-selected={avatarTab === k}
+                          onClick={() => setAvatarTab(k)}
+                          className={`rounded px-2 py-1 text-[11px] font-semibold ${avatarTab === k ? 'bg-[#5865F2] text-white' : 'text-[#9CA3AF] hover:text-white'}`}
+                        >
+                          {k === 'character' ? 'Characters' : 'Emblems'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-2 grid grid-cols-7 gap-1.5 rounded-lg border border-white/10 bg-[#0F1115] p-2">
+                    <button
+                      type="button"
+                      onClick={() => setAvatar({ kind: 'photo' })}
+                      className="flex aspect-square flex-col items-center justify-center rounded-full border border-dashed border-white/25 text-[#9CA3AF] hover:border-[#5865F2] hover:text-white"
+                      title="Upload a photo"
+                    >
+                      <span className="text-lg leading-none">+</span>
+                      <span className="text-[9px] font-semibold leading-tight">Photo</span>
+                    </button>
+                    {(avatarTab === 'character' ? CHARACTERS : EMBLEMS.slice(0, 13)).map((item) => {
+                      const selected = avatar.kind === avatarTab && avatar.id === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          type="button"
+                          title={item.label}
+                          onClick={() => setAvatar({ kind: avatarTab, id: item.id } as AvatarChoice)}
+                          className={`flex aspect-square items-center justify-center rounded-full transition ${selected ? 'ring-2 ring-[#5865F2] ring-offset-2 ring-offset-[#0F1115]' : 'opacity-85 hover:opacity-100'}`}
+                        >
+                          {avatarTab === 'character' ? (
+                            <CharacterAvatar c={item as (typeof CHARACTERS)[number]} size={44} />
+                          ) : (
+                            <EmblemAvatar e={item as (typeof EMBLEMS)[number]} size={44} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {mode === 'host' ? (

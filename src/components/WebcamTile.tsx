@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Translations } from '../shared/i18n';
 import { ROLE_META, formatSeatNumber, type PlayerRecord } from '../shared/mafiaEngine';
+import { CharacterAvatar, characterFor } from './Avatars';
 
 /**
  * How this viewer may show the tile (decided by the shared media policy in App):
@@ -200,6 +201,12 @@ export function WebcamTile({
           />
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2">
+            {/* PROTOTYPE: avatar instead of the initial when the camera is off */}
+            {player.isAlive && !isSmall && display !== 'sleeping' ? (
+              <div className="aspect-square h-[58%] max-h-40 rounded-full ring-2 ring-white/10 [&>svg]:h-full [&>svg]:w-full">
+                <CharacterAvatar c={characterFor(player.nickname)} size={160} />
+              </div>
+            ) : (
             <div
               className={`flex ${
                 isSmall ? 'h-9 w-9 text-base' : 'h-11 w-11 text-lg sm:h-14 sm:w-14 sm:text-xl'
@@ -217,6 +224,7 @@ export function WebcamTile({
                 initial
               )}
             </div>
+            )}
             {display === 'sleeping' && !isSmall && (
               <span className="text-[11px] font-medium text-[#9CA3AF]">{t.eyesClosed}</span>
             )}
