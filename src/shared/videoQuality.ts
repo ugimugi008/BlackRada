@@ -1,18 +1,16 @@
 /**
  * Which video layer to receive for each remote camera.
  *
- * Every camera is sent in three layers: 720p ('high'), 540p ('medium') and
- * 360p ('low'). A viewer asks the server for one layer per person, based on how
- * big that person actually appears on this screen — rounded up — instead of
- * how many people are in the room.
+ * Every camera is sent in three layers: 720p ('high'), 360p ('medium') and a tiny
+ * 180p ('low'). A viewer asks the server for one layer per person, based on how
+ * big that person appears on this screen (rounded up), then trims the total to a
+ * download budget so weak connections stay smooth.
  *
- * - Computers: 720p for any normal-sized tile; only really small tiles (e.g. the
- *   thumbnail strip, a packed table on a non-Retina laptop) get 540p, which looks
- *   identical at that size. Never 360p.
- * - Phones: sized to the tile (screen sharpness counted up to 2x, beyond which the
- *   eye can't tell), and at most a few 720p videos at once so the phone doesn't
- *   overheat or stutter. Whoever is enlarged / giving a speech / last words is
- *   first in line for 720p.
+ * - Computers: 720p for any normal-sized tile; tiny tiles (thumbnail strip) 360p.
+ * - Phones: sized to the tile (sharpness counted up to 2x), at most a few 720p
+ *   videos at once. Whoever is enlarged / giving a speech / last words is first
+ *   in line for 720p.
+ * - 180p is only used to fit the budget / a weak connection, never chosen by size.
  */
 
 export type VideoLayer = 'low' | 'medium' | 'high';
@@ -35,11 +33,13 @@ export function neededVideoHeight(tile: TileSize, pixelRatio: number): number {
 }
 
 export function pickVideoLayer(tile: TileSize | undefined, opts: { phone: boolean; pixelRatio: number }): VideoLayer {
-  if (!tile || tile.width <= 0 || tile.height <= 0) return opts.phone ? 'low' : 'medium';
+  // 'low' (180p) is never asked for by size: it's the emergency level the download
+  // budget (and the server, on a weak connection) steps down to.
+  if (!tile || tile.width <= 0 || tile.height <= 0) return 'medium';
   if (opts.phone) {
     const p = neededVideoHeight(tile, Math.min(opts.pixelRatio, 2));
     // rounded up: the smallest layer that is at least as sharp as the tile
-    return p <= 360 ? 'low' : p <= 540 ? 'medium' : 'high';
+    return p <= 360 ? 'medium' : 'high';
   }
   const p = neededVideoHeight(tile, opts.pixelRatio);
   return p < 120 ? 'medium' : 'high';
@@ -84,13 +84,13 @@ export function isPhoneDevice(): boolean {
  * and mobile data keep up and the video server doesn't have to keep switching
  * layers (every switch briefly freezes that person's picture).
  */
-export const LAYER_MBPS: Record<VideoLayer, number> = { high: 1.7, medium: 0.9, low: 0.45 };
-export const DOWNLOAD_BUDGET_MBPS = { computer: 12, phone: 5 } as const;
+export const LAYER_MBPS: Record<VideoLayer, number> = { high: 1.5, medium: 0.45, low: 0.15 };
+export const DOWNLOAD_BUDGET_MBPS = { computer: 10, phone: 4 } as const;
 
 /**
- * Step people down (720p → 540p → 360p) until the total fits the budget.
+ * Step people down (720p → 360p → 180p) until the total fits the budget.
  * Smallest tiles drop first; everyone in `priority` (enlarged / speaking / last
- * words) keeps their layer. If even all-360p doesn't fit, that's the floor.
+ * words) keeps their layer. If even all-180p doesn't fit, that's the floor.
  */
 export function fitDownloadBudget(
   layers: Record<string, VideoLayer>,

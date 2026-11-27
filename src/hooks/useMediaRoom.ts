@@ -26,24 +26,26 @@ export interface RemotePref {
 }
 
 const VIDEO_QUALITY: Record<Exclude<RemoteVideoPref, 'off'>, VideoQuality> = {
-  low: VideoQuality.LOW, // 360p layer
-  medium: VideoQuality.MEDIUM, // 540p layer
+  low: VideoQuality.LOW, // 180p layer (weak connections)
+  medium: VideoQuality.MEDIUM, // 360p layer
   high: VideoQuality.HIGH, // 720p layer
 };
 
 // Camera publishing. The server forwards each viewer only the layer they asked
 // for (dynacast stops layers nobody needs). VP8 on purpose: VP9/AV1 in LiveKit use
-// SVC with fixed half-size steps (no 540p) and are heavy to encode on phones.
+// SVC and are heavy to encode on phones.
 //
-// Smoothness first: bitrates are moderate so home upload links keep up, and
-// "maintain-framerate" makes a struggling sender lower its resolution instead of
-// freezing the picture.
-//  - computers: 720p (1.7 Mbps) + 540p + 360p, 30 fps
-//  - phones:    720p (1.2 Mbps) + 360p, 24 fps — fewer layers and frames keep
-//               phones cool so their encoder doesn't stall
-const LAYER_540 = new VideoPreset(960, 540, 900_000, 30);
+// Smoothness first:
+//  - layers 720p / 360p / 180p. The tiny 180p layer (~0.15 Mbps) is what lets the
+//    server keep video moving for someone on a weak or lossy connection instead of
+//    freezing it (10 people at 180p fit in ~1.5 Mbps).
+//  - moderate bitrates so home upload links keep up
+//  - "maintain-framerate": a struggling sender lowers resolution instead of freezing
+//  - phones send at 24 fps with a lower top bitrate to stay cool
 const LAYER_360 = new VideoPreset(640, 360, 450_000, 30);
+const LAYER_180 = new VideoPreset(320, 180, 150_000, 15);
 const LAYER_360_PHONE = new VideoPreset(640, 360, 400_000, 24);
+const LAYER_180_PHONE = new VideoPreset(320, 180, 120_000, 15);
 const PHONE_PUBLISHER = isPhoneDevice();
 const CAMERA_PUBLISH = {
   source: Track.Source.Camera,
@@ -51,13 +53,10 @@ const CAMERA_PUBLISH = {
   videoCodec: 'vp8' as const,
   degradationPreference: 'maintain-framerate' as RTCDegradationPreference,
   videoEncoding: PHONE_PUBLISHER
-    ? { maxBitrate: 1_200_000, maxFramerate: 24 }
-    : { maxBitrate: 1_700_000, maxFramerate: 30 },
-  videoSimulcastLayers: PHONE_PUBLISHER ? [LAYER_360_PHONE] : [LAYER_360, LAYER_540],
+    ? { maxBitrate: 1_000_000, maxFramerate: 24 }
+    : { maxBitrate: 1_500_000, maxFramerate: 30 },
+  videoSimulcastLayers: PHONE_PUBLISHER ? [LAYER_180_PHONE, LAYER_360_PHONE] : [LAYER_180, LAYER_360],
 };
-// Microphone: send continuously (no DTX silence-skipping that can clip the start
-// of quiet words) with redundant packets (RED) so short losses on mobile
-// networks don't drop syllables.
 const MIC_PUBLISH = { source: Track.Source.Microphone, dtx: false, red: true };
 
 /** Peer-to-peer mesh sends a separate copy to every peer, so keep it light. */
