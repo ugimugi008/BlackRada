@@ -11,7 +11,7 @@ import {
 } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
-import { createVoiceFilterChain, type VoiceFilterChain } from '../audio/noiseFilter';
+import { isPhoneDevice } from '../shared/videoQuality';
 
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -31,20 +31,34 @@ const VIDEO_QUALITY: Record<Exclude<RemoteVideoPref, 'off'>, VideoQuality> = {
   high: VideoQuality.HIGH, // 720p layer
 };
 
-// Publish 720p with 540p and 360p simulcast layers; the server forwards each
-// viewer only the layer they asked for (dynacast stops layers nobody needs).
-// Bitrates are generous so faces stay clean in dim rooms. VP8 on purpose: VP9/AV1
-// in LiveKit use SVC with fixed half-size steps (720/360/180, no 540p) and are
-// heavy to encode on phones.
-const LAYER_540 = new VideoPreset(960, 540, 1_200_000, 30);
-const LAYER_360 = new VideoPreset(640, 360, 600_000, 30);
+// Camera publishing. The server forwards each viewer only the layer they asked
+// for (dynacast stops layers nobody needs). VP8 on purpose: VP9/AV1 in LiveKit use
+// SVC with fixed half-size steps (no 540p) and are heavy to encode on phones.
+//
+// Smoothness first: bitrates are moderate so home upload links keep up, and
+// "maintain-framerate" makes a struggling sender lower its resolution instead of
+// freezing the picture.
+//  - computers: 720p (1.7 Mbps) + 540p + 360p, 30 fps
+//  - phones:    720p (1.2 Mbps) + 360p, 24 fps — fewer layers and frames keep
+//               phones cool so their encoder doesn't stall
+const LAYER_540 = new VideoPreset(960, 540, 900_000, 30);
+const LAYER_360 = new VideoPreset(640, 360, 450_000, 30);
+const LAYER_360_PHONE = new VideoPreset(640, 360, 400_000, 24);
+const PHONE_PUBLISHER = isPhoneDevice();
 const CAMERA_PUBLISH = {
   source: Track.Source.Camera,
   simulcast: true,
   videoCodec: 'vp8' as const,
-  videoEncoding: { maxBitrate: 2_500_000, maxFramerate: 30 },
-  videoSimulcastLayers: [LAYER_360, LAYER_540],
+  degradationPreference: 'maintain-framerate' as RTCDegradationPreference,
+  videoEncoding: PHONE_PUBLISHER
+    ? { maxBitrate: 1_200_000, maxFramerate: 24 }
+    : { maxBitrate: 1_700_000, maxFramerate: 30 },
+  videoSimulcastLayers: PHONE_PUBLISHER ? [LAYER_360_PHONE] : [LAYER_360, LAYER_540],
 };
+// Microphone: send continuously (no DTX silence-skipping that can clip the start
+// of quiet words) with redundant packets (RED) so short losses on mobile
+// networks don't drop syllables.
+const MIC_PUBLISH = { source: Track.Source.Microphone, dtx: false, red: true };
 
 /** Peer-to-peer mesh sends a separate copy to every peer, so keep it light. */
 function tuneMeshVideoSender(sender: RTCRtpSender) {
@@ -96,22 +110,17 @@ export function useMediaRoom({
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const rawStreamRef = useRef<MediaStream | null>(null);
   const outgoingStreamRef = useRef<MediaStream | null>(null);
-  const voiceFilterRef = useRef<VoiceFilterChain | null>(null);
   const lkRoomRef = useRef<Room | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analysersRef = useRef<Map<string, { analyser: AnalyserNode; data: Uint8Array<ArrayBuffer> }>>(new Map());
 
-  const rebuildOutgoingStream = useCallback((rawStream: MediaStream, ncEnabled: boolean) => {
-    voiceFilterRef.current?.cleanup();
-    voiceFilterRef.current = null;
-
+  // The mic goes out exactly as the browser captured it: the browser's own echo
+  // cancellation, noise suppression and auto-gain (the same processing Google Meet
+  // relies on). No extra noise gate — on phones it cut off quiet words.
+  const rebuildOutgoingStream = useCallback((rawStream: MediaStream) => {
     const tracks: MediaStreamTrack[] = [];
     const rawAudio = rawStream.getAudioTracks()[0];
-    if (rawAudio) {
-      const chain = createVoiceFilterChain(rawAudio, ncEnabled);
-      voiceFilterRef.current = chain;
-      tracks.push(chain.track);
-    }
+    if (rawAudio) tracks.push(rawAudio);
     for (const vt of rawStream.getVideoTracks()) {
       tracks.push(vt);
     }
@@ -133,7 +142,7 @@ export function useMediaRoom({
           audio: wantAudio
             ? {
                 echoCancellation: true,
-                noiseSuppression: true,
+                noiseSuppression: noiseFilterEnabled,
                 autoGainControl: true,
               }
             : false,
@@ -149,7 +158,7 @@ export function useMediaRoom({
 
         rawStreamRef.current?.getTracks().forEach((t) => t.stop());
         rawStreamRef.current = stream;
-        const processed = rebuildOutgoingStream(stream, noiseFilterEnabled);
+        const processed = rebuildOutgoingStream(stream);
         setLocalStream(stream);
         setMediaError(null);
         return processed;
@@ -159,14 +168,14 @@ export function useMediaRoom({
             const audioOnly = await navigator.mediaDevices.getUserMedia({
               audio: {
                 echoCancellation: true,
-                noiseSuppression: true,
+                noiseSuppression: noiseFilterEnabled,
                 autoGainControl: true,
               },
               video: false,
             });
             rawStreamRef.current?.getTracks().forEach((t) => t.stop());
             rawStreamRef.current = audioOnly;
-            const processed = rebuildOutgoingStream(audioOnly, noiseFilterEnabled);
+            const processed = rebuildOutgoingStream(audioOnly);
             setLocalStream(audioOnly);
             setMediaError('Camera unavailable — audio connected.');
             return processed;
@@ -185,17 +194,68 @@ export function useMediaRoom({
   );
 
   const stopLocalMedia = useCallback(() => {
-    voiceFilterRef.current?.cleanup();
-    voiceFilterRef.current = null;
     rawStreamRef.current?.getTracks().forEach((t) => t.stop());
     rawStreamRef.current = null;
     outgoingStreamRef.current = null;
     setLocalStream(null);
   }, []);
 
-  // Toggle noise filter dynamically without tearing down the mic stream
+  // "Noise filter" = the browser's built-in noise suppression. Browsers (Chrome)
+  // ignore changing it on a live track, and while the old mic is open a new one
+  // inherits its processing — so we close the mic, re-open it with the new setting
+  // and swap it into the call (a fraction of a second; camera untouched, mute kept).
   useEffect(() => {
-    voiceFilterRef.current?.setEnabled(noiseFilterEnabled);
+    const raw = rawStreamRef.current;
+    const old = raw?.getAudioTracks()[0];
+    if (!raw || !old || old.readyState !== 'live') return;
+    if (old.getSettings().noiseSuppression === noiseFilterEnabled) return;
+    let cancelled = false;
+    const deviceId = old.getSettings().deviceId;
+    const wasEnabled = old.enabled;
+    const openMic = (noiseSuppression: boolean) =>
+      navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+          echoCancellation: true,
+          autoGainControl: true,
+          noiseSuppression,
+        },
+      });
+    old.stop();
+    openMic(noiseFilterEnabled)
+      // if the browser refuses, re-open with the previous setting rather than leave the mic dead
+      .catch(() => openMic(!noiseFilterEnabled))
+      .then(async (fresh) => {
+        const track = fresh.getAudioTracks()[0];
+        if (cancelled || !track || rawStreamRef.current !== raw) {
+          fresh.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        track.enabled = wasEnabled;
+        raw.removeTrack(old);
+        raw.addTrack(track);
+        const out = outgoingStreamRef.current;
+        if (out && out !== raw) {
+          out.removeTrack(old);
+          out.addTrack(track);
+        }
+        // LiveKit
+        const pub = lkRoomRef.current?.localParticipant.getTrackPublication(Track.Source.Microphone);
+        if (pub?.audioTrack) await pub.audioTrack.replaceTrack(track, true).catch(() => {});
+        // direct (mesh) fallback
+        peersRef.current.forEach((pc) =>
+          pc.getSenders().forEach((sender) => {
+            if (sender.track === old) sender.replaceTrack(track).catch(() => {});
+          })
+        );
+        setLocalStream(new MediaStream(raw.getTracks()));
+      })
+      .catch(() => {
+        // no microphone available at all; the mic button will show the problem
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [noiseFilterEnabled]);
 
   // Apply mute & camera hide flags (personal + Night sleep + Moderator override)
@@ -257,7 +317,7 @@ export function useMediaRoom({
       },
       publishDefaults: {
         simulcast: true,
-        videoSimulcastLayers: [LAYER_360, LAYER_540],
+        videoSimulcastLayers: CAMERA_PUBLISH.videoSimulcastLayers,
       },
     });
     lkRoomRef.current = lkRoom;
@@ -322,7 +382,7 @@ export function useMediaRoom({
           const videoTrack = out.getVideoTracks()[0];
           if (audioTrack) {
             await lkRoom.localParticipant
-              .publishTrack(audioTrack, { source: Track.Source.Microphone })
+              .publishTrack(audioTrack, MIC_PUBLISH)
               .catch(() => {});
           }
           if (videoTrack) {
@@ -352,7 +412,7 @@ export function useMediaRoom({
     const videoTrack = out.getVideoTracks()[0];
     if (audioTrack && !lkRoom.localParticipant.getTrackPublication(Track.Source.Microphone)) {
       lkRoom.localParticipant
-        .publishTrack(audioTrack, { source: Track.Source.Microphone })
+        .publishTrack(audioTrack, MIC_PUBLISH)
         .catch(() => {});
     }
     if (videoTrack && !lkRoom.localParticipant.getTrackPublication(Track.Source.Camera)) {

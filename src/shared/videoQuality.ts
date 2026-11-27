@@ -77,3 +77,38 @@ export function isPhoneDevice(): boolean {
   const shortSide = Math.min(window.screen?.width ?? 1024, window.screen?.height ?? 1024);
   return coarse && shortSide < 600;
 }
+
+/**
+ * Rough download cost of each layer, in Mbps (what the senders are capped at).
+ * Used to keep the total a device receives within a sane budget, so home Wi-Fi
+ * and mobile data keep up and the video server doesn't have to keep switching
+ * layers (every switch briefly freezes that person's picture).
+ */
+export const LAYER_MBPS: Record<VideoLayer, number> = { high: 1.7, medium: 0.9, low: 0.45 };
+export const DOWNLOAD_BUDGET_MBPS = { computer: 12, phone: 5 } as const;
+
+/**
+ * Step people down (720p → 540p → 360p) until the total fits the budget.
+ * Smallest tiles drop first; everyone in `priority` (enlarged / speaking / last
+ * words) keeps their layer. If even all-360p doesn't fit, that's the floor.
+ */
+export function fitDownloadBudget(
+  layers: Record<string, VideoLayer>,
+  sizes: Record<string, TileSize | undefined>,
+  priority: (string | null | undefined)[],
+  budgetMbps: number
+): Record<string, VideoLayer> {
+  const out = { ...layers };
+  const total = () => Object.values(out).reduce((sum, l) => sum + LAYER_MBPS[l], 0);
+  const area = (id: string) => (sizes[id]?.width ?? 0) * (sizes[id]?.height ?? 0);
+  const down: Record<VideoLayer, VideoLayer | null> = { high: 'medium', medium: 'low', low: null };
+  const rank: Record<VideoLayer, number> = { high: 2, medium: 1, low: 0 };
+  while (total() > budgetMbps) {
+    const candidates = Object.keys(out).filter((id) => down[out[id]] && !priority.includes(id));
+    if (candidates.length === 0) break;
+    // highest layer first, then the smallest tile
+    candidates.sort((a, b) => rank[out[b]] - rank[out[a]] || area(a) - area(b));
+    out[candidates[0]] = down[out[candidates[0]]]!;
+  }
+  return out;
+}

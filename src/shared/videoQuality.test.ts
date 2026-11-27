@@ -47,3 +47,22 @@ test('cap leaves fewer than 4 HD untouched', () => {
   const layers = { a: 'high', b: 'low', c: 'medium' } as const;
   assert.deepEqual(capPhoneHd({ ...layers }, {}, []), layers);
 });
+
+test('download budget: a full laptop table drops to 540p instead of choking', async () => {
+  const { fitDownloadBudget, LAYER_MBPS } = await import('./videoQuality');
+  const ids = Array.from({ length: 11 }, (_, i) => `p${i}`);
+  const layers = Object.fromEntries(ids.map((id) => [id, 'high' as const]));
+  const sizes = Object.fromEntries(ids.map((id, i) => [id, { width: 300 + i, height: 170 }]));
+  const out = fitDownloadBudget(layers, sizes, ['p0'], 12);
+  const total = Object.values(out).reduce((s, l) => s + LAYER_MBPS[l], 0);
+  assert.ok(total <= 12, `total ${total}`);
+  assert.equal(out.p0, 'high'); // the speaker keeps 720p
+  assert.equal(out.p10, 'high'); // biggest tile keeps 720p longest
+  assert.equal(out.p1, 'medium'); // smallest tiles step down first
+});
+
+test('download budget leaves a small table alone', async () => {
+  const { fitDownloadBudget } = await import('./videoQuality');
+  const layers = { a: 'high', b: 'high', c: 'high', d: 'high', e: 'high' } as const;
+  assert.deepEqual(fitDownloadBudget({ ...layers }, {}, [], 12), layers);
+});

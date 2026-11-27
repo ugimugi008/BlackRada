@@ -34,7 +34,14 @@ import { AutoGrid } from './components/AutoGrid';
 import { useTileSizes } from './hooks/useTileSizes';
 import { useGameSounds } from './hooks/useGameSounds';
 import { useWakeLock } from './hooks/useWakeLock';
-import { capPhoneHd, isPhoneDevice, pickVideoLayer, type VideoLayer } from './shared/videoQuality';
+import {
+  DOWNLOAD_BUDGET_MBPS,
+  capPhoneHd,
+  fitDownloadBudget,
+  isPhoneDevice,
+  pickVideoLayer,
+  type VideoLayer,
+} from './shared/videoQuality';
 import { clampVolume, loadVolumes, saveVolumes, volumeKey, type VolumeMap } from './volumes';
 import { loadAvatarChoice, saveAvatarChoice } from './avatarChoice';
 import type { Avatar } from './shared/avatars';
@@ -194,6 +201,7 @@ export default function App() {
       layers[p.id] = hdPriority.includes(p.id) ? 'high' : pickVideoLayer(tileSizes[p.id], { phone, pixelRatio });
     }
     if (phone) layers = capPhoneHd(layers, tileSizes, hdPriority);
+    layers = fitDownloadBudget(layers, tileSizes, hdPriority, phone ? DOWNLOAD_BUDGET_MBPS.phone : DOWNLOAD_BUDGET_MBPS.computer);
     for (const p of room.players) {
       if (p.id === me.id) continue;
       const perc = perceive(me, p, ctx);
